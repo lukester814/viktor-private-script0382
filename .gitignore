@@ -27,3 +27,28 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+# Compiled files
+*.class
+*.jar
+out/
+build/
+target/
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+
+# DreamBot data
+data/
+BotData/
+
+# Sensitive config
+*.csv
+settings.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
