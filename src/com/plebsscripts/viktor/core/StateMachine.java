@@ -21,6 +21,11 @@ public class StateMachine {
 
     // Core runtime phases
     public enum Phase { IDLE, WALK_TO_GE, PROBE, ROTATE }
+    // In StateMachine.java Phase enum, add:
+    public enum Phase {
+        IDLE, ROTATE, PROBE, BUY_BULK, SELL_BULK, COOLDOWN  // Add COOLDOWN
+    }
+
 
     private Phase phase = Phase.IDLE;
     private final Settings settings;
@@ -86,6 +91,16 @@ public class StateMachine {
         }
     }
 
+    // Add to StateMachine.java
+    public void updateItems(List<ItemConfig> newItems) {
+        synchronized (this.items) {
+            this.items.clear();
+            this.items.addAll(newItems);
+            Logs.info("StateMachine updated with " + newItems.size() + " items");
+        }
+    }
+
+
     public LimitTracker getLimitTracker() { return limits; }
     public Phase getPhase() { return phase; }
     public ItemConfig getCurrentItem() { return current; }
@@ -143,4 +158,25 @@ public class StateMachine {
 
         return timers.shortWait();
     }
+
+    private int handleBanking() {
+        if (!bank.needsBank()) {
+            Logs.info("Nothing to bank");
+            phase = Phase.COOLDOWN;
+            return 1000;
+        }
+
+        if (!bank.nearBank()) {
+            Logs.warn("Not near bank");
+            // Walk to bank
+            return 3000;
+        }
+
+        bank.bankAll();
+        antiBan.mediumPause();
+
+        phase = Phase.COOLDOWN;
+        return 1000;
+    }
+
 }

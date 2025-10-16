@@ -15,7 +15,7 @@ public class GEApiDreamBotAdapter implements GEApi {
     public static GEApiDreamBotAdapter instance() { return INST; }
 
     private final GEApiDreamBot track = GEApiDreamBot.instance();
-    private final Map<String, Integer> itemToOfferId = new ConcurrentHashMap<String, Integer>();
+    private final Map<String, Integer> itemToOfferId = new ConcurrentHashMap<>();
 
     private GEApiDreamBotAdapter() {}
 
@@ -62,11 +62,14 @@ public class GEApiDreamBotAdapter implements GEApi {
             boolean success = GrandExchange.buyItem(itemName, qty, priceEach);
             if (success) {
                 GEApiDreamBot.OfferInfo oi = track.registerOffer(itemName, GEApiDreamBot.Type.BUY, priceEach, qty);
-                itemToOfferId.put(itemName, Integer.valueOf(oi.offerId));
-                Logs.info("PLACED BUY " + itemName + " @" + priceEach + " x" + qty);
+                itemToOfferId.put(itemName, oi.offerId);
+                Logs.info("Buy placed: " + qty + "x " + itemName + " @ " + priceEach + " gp");
                 return BuyOutcome.PLACED;
             }
-            // TODO: detect limit hit via widget inspection
+
+            // Check for limit hit (you can enhance this with widget checks)
+            // TODO: Check widgets/chat for "You have reached your limit"
+
             return BuyOutcome.FAILED;
         } catch (Exception e) {
             Logs.warn("placeBuy failed: " + e.getMessage());
@@ -79,10 +82,21 @@ public class GEApiDreamBotAdapter implements GEApi {
         if (priceEach <= 0) return SellOutcome.FAILED;
 
         try {
-            // DreamBot's sell method uses inventory items
-            boolean success = GrandExchange.sellItem(itemName, 1, priceEach); // Sells all matching in inv
+            int qty = qtyOrZeroForAll;
+            if (qty == 0) {
+                qty = Inventory.count(itemName);
+            }
+
+            if (qty == 0) {
+                Logs.warn("No items to sell: " + itemName);
+                return SellOutcome.FAILED;
+            }
+
+            boolean success = GrandExchange.sellItem(itemName, qty, priceEach);
             if (success) {
-                Logs.info("PLACED SELL " + itemName + " @" + priceEach);
+                GEApiDreamBot.OfferInfo oi = track.registerOffer(itemName, GEApiDreamBot.Type.SELL, priceEach, qty);
+                itemToOfferId.put(itemName + "_sell", oi.offerId); // Different key for sells
+                Logs.info("Sell placed: " + qty + "x " + itemName + " @ " + priceEach + " gp");
                 return SellOutcome.PLACED;
             }
             return SellOutcome.FAILED;
@@ -96,7 +110,12 @@ public class GEApiDreamBotAdapter implements GEApi {
     public void collectAll() {
         try {
             GrandExchange.collect();
-            Logs.info("Collected GE offers");
+
+            // Clear tracked offers since they're collected
+            track.cancelAllTrackedOffers();
+            itemToOfferId.clear();
+
+            Logs.info("Collected all GE offers");
         } catch (Exception e) {
             Logs.warn("collectAll failed: " + e.getMessage());
         }
@@ -129,35 +148,92 @@ public class GEApiDreamBotAdapter implements GEApi {
 
     @Override
     public boolean hasStaleSells(String itemName, int staleMinutes) {
+        // Similar logic to hasStaleBuys but for sells
+        long threshold = Math.max(1, staleMinutes) * 60L * 1000L;
+        long now = System.currentTimeMillis();
+
+        for (GEApiDreamBot.OfferInfo oi : track.trackedOffers.values()) {
+            if (oi.type == GEApiDreamBot.Type.SELL &&
+                    oi.itemName.equals(itemName) &&
+                    oi.remainingQty > 0 &&
+                    (now - oi.timestampMs) > threshold) {
+                return true;
+            }
+        }
         return false;
     }
 
     @Override
     public boolean repriceBuys(String itemName, int newPriceEach) {
-        Logs.info("Reprice buys " + itemName + " -> " + newPriceEach + " (stub OK)");
-        return true;
+        // Cancel existing buy and place new one
+        cancelBuys(itemName);
+
+        try {
+            // Small delay before repricing
+            Thread.sleep(600);
+
+            int qty = 100; // Or get from previous offer
+            BuyOutcome result = placeBuy(itemName, newPriceEach, qty);
+
+            if (result == BuyOutcome.PLACED) {
+                Logs.info("Repriced buy: " + itemName + " → " + newPriceEach + " gp");
+                return true;
+            }
+        } catch (Exception e) {
+            Logs.warn("Reprice failed: " + e.getMessage());
+        }
+
+        return false;
     }
 
     @Override
     public void cancelBuys(String itemName) {
         Integer id = itemToOfferId.remove(itemName);
         if (id != null) {
-            track.markOfferCompleted(id.intValue());
-            Logs.info("Cancelled buy (logical) " + itemName + " offerId=" + id);
+            track.markOfferCompleted(id);
+            Logs.info("Cancelled buy: " + itemName + " (offerId=" + id + ")");
+        }
+
+        // Also cancel in GE UI if needed
+        try {
+            for (int slot = 0; slot < 8; slot++) {
+                if (GrandExchange.slotContains(slot, itemName)) {
+                    GrandExchange.cancelOffer(slot);
+                }
+            }
+        } catch (Exception e) {
+            Logs.warn("GE cancel failed: " + e.getMessage());
         }
     }
 
     @Override
     public void undercutSells(String itemName, int newSellPrice) {
-        Logs.info("Undercut sells " + itemName + " -> " + newSellPrice + " (stub).");
+        // Cancel and relist
+        try {
+            for (int slot = 0; slot < 8; slot++) {
+                if (GrandExchange.slotContains(slot, itemName)) {
+                    GrandExchange.cancelOffer(slot);
+                    Thread.sleep(600);
+
+                    int qty = Inventory.count(itemName);
+                    if (qty > 0) {
+                        placeSell(itemName, newSellPrice, qty);
+                        Logs.info("Undercut sell: " + itemName + " → " + newSellPrice + " gp");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Logs.warn("Undercut failed: " + e.getMessage());
+        }
     }
 
     @Override
     public boolean offersComplete(String itemName) {
         try {
-            // Check if any slot is ready to collect
-            for (int i = 0; i < 8; i++) {
-                if (GrandExchange.isReadyToCollect(i)) {
+            // Check if any offer for this item is ready to collect
+            for (int slot = 0; slot < 8; slot++) {
+                if (GrandExchange.slotContains(slot, itemName) &&
+                        GrandExchange.isReadyToCollect(slot)) {
                     return true;
                 }
             }

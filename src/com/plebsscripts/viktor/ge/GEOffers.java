@@ -2,20 +2,35 @@ package com.plebsscripts.viktor.ge;
 
 import com.plebsscripts.viktor.config.ItemConfig;
 import com.plebsscripts.viktor.config.Settings;
+import com.plebsscripts.viktor.core.ProfitTracker;
 import com.plebsscripts.viktor.ge.GEApi.BuyOutcome;
 import com.plebsscripts.viktor.limits.LimitTracker;
 import com.plebsscripts.viktor.notify.DiscordNotifier;
 import com.plebsscripts.viktor.util.Logs;
 
+/**
+ * Handles placing buy/sell offers on the GE.
+ * Manages GP limits, slot availability, and 4h trade limits.
+ */
 public class GEOffers {
     private final GEApi ge;
     private final DiscordNotifier notify;
+    private ProfitTracker profit; // Optional profit tracking
 
     public GEOffers(GEApi ge, DiscordNotifier notify) {
         this.ge = ge;
         this.notify = notify;
     }
 
+    // Optional: Set profit tracker for recording trades
+    public void setProfitTracker(ProfitTracker profit) {
+        this.profit = profit;
+    }
+
+    /**
+     * Place bulk buy orders for an item.
+     * Respects GP limits, slot availability, and 4h limits.
+     */
     public Result placeBuys(ItemConfig ic, PriceModel pricing, LimitTracker limits, Settings s) {
         if (limits.isBlocked(ic.itemName)) {
             Logs.info("4h blocked locally: " + ic.itemName);
@@ -29,46 +44,73 @@ public class GEOffers {
 
         int targetQty = clampQty(ic.maxQtyPerCycle);
         int placedQty = 0;
-
-        // Use estBuy (not estBuyPrice)
         int buyPrice = ic.estBuy;
 
         while (placedQty < targetQty) {
+            // Check slot availability
             int freeSlots = ge.freeSlots();
             if (freeSlots <= 0) {
                 Logs.warn("No free GE slots");
                 break;
             }
 
+            // Check GP budget
             int gpInFlight = ge.gpInFlight();
             long availableGp = s.maxGpInFlight - gpInFlight;
+
             if (availableGp < buyPrice) {
-                Logs.warn("GP exposure limit reached");
+                Logs.warn("GP exposure limit reached (" + s.maxGpInFlight + " max)");
                 break;
             }
 
-            int batch = Math.min(targetQty - placedQty, (int)(availableGp / buyPrice));
-            batch = Math.min(batch, 100);
+            // Calculate batch size
+            int affordableQty = (int)(availableGp / buyPrice);
+            int batch = Math.min(targetQty - placedQty, affordableQty);
+            batch = Math.min(batch, 100); // GE slot limit
 
-            if (batch <= 0) break;
+            // Check per-flip limit
+            if (s.maxGpPerFlip > 0) {
+                int maxQtyPerFlip = (int)(s.maxGpPerFlip / buyPrice);
+                batch = Math.min(batch, maxQtyPerFlip);
+            }
 
+            if (batch <= 0) {
+                Logs.warn("Batch size too small, stopping buys");
+                break;
+            }
+
+            // Place order
             BuyOutcome out = ge.placeBuy(ic.itemName, buyPrice, batch);
 
-            // Use LIMIT_HIT (not HIT_4H_LIMIT)
             if (out == BuyOutcome.LIMIT_HIT) {
                 limits.blockFor4h(ic.itemName);
+                Logs.warn("4h trade limit hit: " + ic.itemName);
+
                 if (notify != null) {
-                    Logs.info("Trade limit hit: " + ic.itemName);
+                    long remainingTime = limits.getRemainingBlockTime(ic.itemName);
+                    notify.limitHit(ic, remainingTime);
                 }
+
+                ge.close();
                 return Result.hit4h();
             }
 
             if (out == BuyOutcome.PLACED) {
                 placedQty += batch;
-                if (notify != null) {
-                    notify.tradeBuyPlaced(ic, buyPrice, batch);
+
+                // Track profit
+                if (profit != null) {
+                    profit.recordBuy(ic.itemName, batch, buyPrice);
                 }
-                sleep(1500, 3000);
+
+                // Notify Discord
+                if (notify != null) {
+                    notify.info("Buy placed: " + batch + "x " + ic.itemName + " @ " + buyPrice + " gp");
+                }
+
+                Logs.info("Buy placed: " + batch + "x " + ic.itemName + " @ " + buyPrice + " gp");
+                sleep(1500, 3000); // Anti-pattern delay
+
             } else {
                 Logs.warn("Buy failed: " + out);
                 break;
@@ -76,34 +118,73 @@ public class GEOffers {
         }
 
         ge.close();
-        return placedQty > 0 ? Result.ok() : Result.fail();
+
+        if (placedQty > 0) {
+            Logs.info("Total buys placed: " + placedQty + "x " + ic.itemName);
+            return Result.ok();
+        }
+
+        return Result.fail();
     }
 
+    /**
+     * Place sell orders for items in inventory.
+     */
     public void listSells(ItemConfig ic, PriceModel pricing, Settings s) {
         if (!ge.ensureOpen()) {
             Logs.warn("Cannot open GE for sells");
             return;
         }
 
-        // Check inventory - for now assume we have items from completed buys
-        if (!ge.inventoryHas(ic.itemName)) {
+        // Count inventory items
+        int invQty = ge.inventoryCount(ic.itemName);
+        if (invQty <= 0) {
             Logs.info("No items to sell: " + ic.itemName);
             ge.close();
             return;
         }
 
-        // Use estSell (not estSellPrice)
         int sellPrice = ic.estSell;
+        int totalSold = 0;
 
-        // Place sell offer - use 0 for "all in inventory"
-        GEApi.SellOutcome out = ge.placeSell(ic.itemName, sellPrice, 0);
+        // Sell in batches (100 items per GE slot)
+        int remaining = invQty;
+        while (remaining > 0 && ge.freeSlots() > 0) {
+            int batch = Math.min(remaining, 100);
 
-        if (out == GEApi.SellOutcome.PLACED && notify != null) {
-            notify.tradeSellPlaced(ic, sellPrice, 0); // 0 = all inventory
+            GEApi.SellOutcome out = ge.placeSell(ic.itemName, sellPrice, batch);
+
+            if (out == GEApi.SellOutcome.PLACED) {
+                remaining -= batch;
+                totalSold += batch;
+
+                // Track profit
+                if (profit != null) {
+                    profit.recordSell(ic.itemName, batch, sellPrice);
+                }
+
+                // Notify Discord
+                if (notify != null) {
+                    notify.info("Sell placed: " + batch + "x " + ic.itemName + " @ " + sellPrice + " gp");
+                }
+
+                Logs.info("Sell placed: " + batch + "x " + ic.itemName + " @ " + sellPrice + " gp");
+                sleep(1500, 3000); // Anti-pattern delay
+
+            } else {
+                Logs.warn("Sell failed: " + out);
+                break;
+            }
         }
 
         ge.close();
+
+        if (totalSold > 0) {
+            Logs.info("Total sells placed: " + totalSold + "x " + ic.itemName);
+        }
     }
+
+    // === Helpers ===
 
     private int clampQty(int max) {
         return Math.max(1, Math.min(max, 1000));
@@ -116,6 +197,8 @@ public class GEOffers {
             Thread.currentThread().interrupt();
         }
     }
+
+    // === Result class ===
 
     public static class Result {
         private final boolean ok;

@@ -14,12 +14,13 @@ import org.dreambot.api.script.Category;
 import java.awt.*;
 import java.io.File;
 import java.util.List;
+import java.util.Map;
 
 @ScriptManifest(
         author = "Plebs Scripts",
-        name = "Plebs Private Script",
-        description = "CSV-driven GE flipper",
-        version = 0.1,
+        name = "Viktor GE Flipper",
+        description = "CSV-driven GE flipper with coordinator support",
+        version = 1.0,
         category = Category.MONEYMAKING
 )
 public class Viktor extends AbstractScript {
@@ -28,31 +29,66 @@ public class Viktor extends AbstractScript {
     private AppGUI gui;
     private com.plebsscripts.viktor.ui.OnPaintOverlay overlay;
     private ProfitTracker profit;
+    private HotReloader hotReloader;
 
     @Override
     public void onStart() {
-        Logs.info("Viktor Private Script starting...");
+        Logs.info("Viktor starting...");
 
+        // Setup data directory
         File dataDir = new File("data");
         dataDir.mkdirs();
 
+        // Load settings and CSV
         settings = SettingsStore.loadOrDefault(dataDir);
         List<ItemConfig> items = CSVConfigLoader.load(settings.inputPath);
+        Logs.info("Loaded " + items.size() + " items from CSV");
 
-        // Get adapter and inject THIS script
+        // Load profiles
+        Map<String, Settings> profiles = Profiles.loadAll(dataDir);
+        Profiles.createDefaultIfNeeded(dataDir); // Create default if none exist
+
+        // Setup coordinator (if enabled)
+        CoordinatorClient coord = settings.enableCoordinator ?
+                new CoordinatorClient(settings.coordinatorUrl) : null;
+
+        if (coord != null) {
+            Logs.info("Coordinator enabled: " + settings.coordinatorUrl);
+        }
+
+        // Get GE API adapter
         GEApiDreamBotAdapter geAdapter = GEApiDreamBotAdapter.instance();
-        // geAdapter.setScript(this);  // <-- CRITICAL LINE
 
-        // Rest of your code stays the same...
+        // Setup GUI
         ItemTableModel tm = new ItemTableModel();
         tm.setItems(items);
-        gui = new AppGUI(settings, Profiles.loadAll(dataDir), tm);
+        gui = new AppGUI(settings, profiles, tm);
         gui.open();
-        gui.waitUntilStart();
-        gui.captureSettings();
 
+        Logs.info("Waiting for user to press Start...");
+        gui.waitUntilStart();
+        gui.captureSettings(); // Capture any GUI changes
+
+        // Setup hot reloader for CSV changes
+        hotReloader = new HotReloader(settings.inputPath, newItems -> {
+            Logs.info("CSV reloaded - updating " + newItems.size() + " items");
+
+            // Update StateMachine
+            if (state != null) {
+                state.updateItems(newItems);
+            }
+
+            // Update GUI table
+            if (gui != null && tm != null) {
+                tm.setItems(newItems);
+            }
+        }, 30000); // Check every 30 seconds
+
+        hotReloader.start();
+        Logs.info("Hot reloader started");
+
+        // Initialize subsystems
         LimitTracker limits = LimitStore.loadForAccount(dataDir, settings.getAccountName());
-        CoordinatorClient coord = null;
         DiscordNotifier notify = DiscordNotifier.fromSettings(settings);
         profit = new ProfitTracker();
 
@@ -62,31 +98,70 @@ public class Viktor extends AbstractScript {
         PriceModel price = new PriceModel();
         InventoryBanking bank = new InventoryBanking();
 
+        // FIX: Pass Settings to AntiBan constructor
+        AntiBan antiBan = new AntiBan(settings);
+        Timers timers = new Timers();
+
+        // FIX: StateMachine needs ProfitTracker as last parameter
         state = new StateMachine(
                 settings, items, coord, limits,
                 nav, offers, probe, price, bank,
-                new AntiBan(), new Timers(), notify
+                antiBan, timers, notify, profit  // ADD profit here!
         );
 
+        // Setup overlay
         overlay = new com.plebsscripts.viktor.ui.OnPaintOverlay(state, profit);
-        state.start();
-    }
 
+        // Start state machine
+        state.start();
+
+        Logs.info("Viktor initialized successfully!");
+        Logs.info("═══════════════════════════════════════");
+        Logs.info("  Items: " + items.size());
+        Logs.info("  Coordinator: " + (coord != null ? "Enabled" : "Disabled"));
+        Logs.info("  Discord: " + (notify != null ? "Enabled" : "Disabled"));
+        Logs.info("═══════════════════════════════════════");
+    }
 
     @Override
     public int onLoop() {
+        // Update GUI with live stats
+        if (gui != null && profit != null) {
+            gui.setLiveStats(profit.summary());
+        }
+
+        // Main state machine tick
         return state.tick();
     }
 
     @Override
     public void onExit() {
         Logs.info("Viktor stopping...");
+
+        // Stop hot reloader
+        if (hotReloader != null) {
+            hotReloader.stop();
+        }
+
+        // Save state
         File dataDir = new File("data");
-        LimitStore.saveForAccount(dataDir, settings.getAccountName(), state.getLimitTracker());
+        if (state != null) {
+            LimitStore.saveForAccount(dataDir, settings.getAccountName(), state.getLimitTracker());
+        }
         SettingsStore.save(dataDir, settings);
+
+        // Log final stats
+        if (profit != null) {
+            Logs.info(profit.detailedSummary());
+        }
+
+        Logs.info("Viktor stopped. Goodbye!");
     }
 
+    @Override
     public void onPaint(Graphics g) {
-        if (overlay != null) overlay.paint(g);
+        if (overlay != null) {
+            overlay.paint(g);
+        }
     }
 }
