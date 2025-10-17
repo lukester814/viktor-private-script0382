@@ -118,6 +118,9 @@ public class HotReloader implements Runnable {
     /**
      * Future: Load from Pastebin URL instead of file
      */
+    /**
+     * IMPLEMENTED: Load from Pastebin URL instead of file
+     */
     public static class PastebinReloader implements Runnable {
         private final String pastebinUrl;
         private final Callback callback;
@@ -144,12 +147,25 @@ public class HotReloader implements Runnable {
 
         @Override
         public void run() {
+            // Add random offset per account
+            long seed = pastebinUrl.hashCode();
+            Random rng = new Random(seed);
+            long accountOffset = rng.nextInt(30000); // 0-30s offset
+
+            try {
+                Thread.sleep(accountOffset); // Initial delay
+            } catch (InterruptedException e) {
+                return;
+            }
+
             while (running) {
                 try {
-                    Thread.sleep(checkIntervalMs);
+                    // Add jitter (±20%)
+                    long jitter = (long)(checkIntervalMs * 0.2 * (Math.random() * 2 - 1));
+                    Thread.sleep(checkIntervalMs + jitter);
 
-                    // TODO: Fetch pastebin content via HTTP
-                    String content = fetchPastebin(pastebinUrl);
+                    // Fetch from URL
+                    String content = com.plebsscripts.viktor.util.HTTPFetcher.fetch(pastebinUrl);
 
                     if (content != null && !content.equals(lastContent)) {
                         Logs.info("Pastebin changed, reloading...");
@@ -169,21 +185,36 @@ public class HotReloader implements Runnable {
                     break;
                 } catch (Exception e) {
                     Logs.warn("PastebinReloader error: " + e.getMessage());
+                    // Don't spam errors - wait longer on failure
+                    try {
+                        Thread.sleep(checkIntervalMs * 2);
+                    } catch (InterruptedException ie) {
+                        break;
+                    }
                 }
             }
         }
 
-        private String fetchPastebin(String url) {
-            // TODO: Implement HTTP GET
-            // Use java.net.URL and HttpURLConnection
-            return null;
-        }
-
+        /**
+         * Parse CSV content from string
+         */
         private List<ItemConfig> parseCSVContent(String content) {
-            // TODO: Parse CSV from string instead of file
-            // Could write to temp file and use CSVConfigLoader.load()
-            // Or refactor CSVConfigLoader to accept BufferedReader
-            return null;
+            try {
+                // Write to temp file and use existing loader
+                File temp = File.createTempFile("viktor_pastebin_", ".csv");
+                temp.deleteOnExit();
+
+                java.nio.file.Files.write(temp.toPath(), content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+                List<ItemConfig> items = CSVConfigLoader.load(temp.getAbsolutePath());
+
+                temp.delete();
+
+                return items;
+
+            } catch (Exception e) {
+                Logs.warn("CSV parse failed: " + e.getMessage());
+                return null;
+            }
         }
-    }
-}
+    }}

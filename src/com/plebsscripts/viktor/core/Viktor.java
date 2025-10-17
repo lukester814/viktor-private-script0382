@@ -72,30 +72,68 @@ public class Viktor extends AbstractScript {
         gui.captureSettings();
 
         // Setup hot reloader with improved timing
-        hotReloader = new HotReloader(settings.inputPath, new HotReloader.Callback() {
-            public void onReload(List<ItemConfig> newItems) {
-                Logs.info("CSV reloaded - personalizing " + newItems.size() + " items");
+        if (settings.hotReload != null && settings.hotReload.enabled &&
+                settings.hotReload.pastebinUrl != null && !settings.hotReload.pastebinUrl.isEmpty()) {
 
-                // Personalize new items
-                List<ItemConfig> personalized = ConfigPersonalizer.personalizeForAccount(
-                        newItems, settings.getAccountName()
-                );
-                personalized = ConfigPersonalizer.filterUnprofitable(personalized);
+            // Use Pastebin reloader
+            Logs.info("Starting Pastebin reloader: " + settings.hotReload.pastebinUrl);
 
-                // Update StateMachine
-                if (state != null) {
-                    state.updateItems(personalized);
+            HotReloader.PastebinReloader pastebinReloader = new HotReloader.PastebinReloader(
+                    settings.hotReload.pastebinUrl,
+                    new HotReloader.Callback() {
+                        public void onReload(List<ItemConfig> newItems) {
+                            Logs.info("Pastebin CSV reloaded - personalizing " + newItems.size() + " items");
+
+                            // Personalize new items
+                            List<ItemConfig> personalized = ConfigPersonalizer.personalizeForAccount(
+                                    newItems, settings.getAccountName()
+                            );
+                            personalized = ConfigPersonalizer.filterUnprofitable(personalized);
+
+                            // Update StateMachine
+                            if (state != null) {
+                                state.updateItems(personalized);
+                            }
+
+                            // Update GUI table
+                            if (gui != null && tm != null) {
+                                tm.setItems(personalized);
+                            }
+                        }
+                    },
+                    settings.hotReload.checkIntervalSeconds * 1000L
+            );
+
+            pastebinReloader.start();
+            Logs.info("Pastebin hot reloader started");
+
+        } else {
+            // Use file watcher (existing code)
+            hotReloader = new HotReloader(settings.inputPath, new HotReloader.Callback() {
+                public void onReload(List<ItemConfig> newItems) {
+                    Logs.info("CSV reloaded - personalizing " + newItems.size() + " items");
+
+                    // Personalize new items
+                    List<ItemConfig> personalized = ConfigPersonalizer.personalizeForAccount(
+                            newItems, settings.getAccountName()
+                    );
+                    personalized = ConfigPersonalizer.filterUnprofitable(personalized);
+
+                    // Update StateMachine
+                    if (state != null) {
+                        state.updateItems(personalized);
+                    }
+
+                    // Update GUI table
+                    if (gui != null && tm != null) {
+                        tm.setItems(personalized);
+                    }
                 }
+            }, 30000);
 
-                // Update GUI table
-                if (gui != null && tm != null) {
-                    tm.setItems(personalized);
-                }
-            }
-        }, 30000);
-
-        hotReloader.start();
-        Logs.info("Hot reloader started");
+            hotReloader.start();
+            Logs.info("File hot reloader started");
+        }
 
         // Initialize subsystems
         LimitTracker limits = LimitStore.loadForAccount(dataDir, settings.getAccountName());
