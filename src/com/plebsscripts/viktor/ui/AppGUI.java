@@ -1,6 +1,7 @@
 package com.plebsscripts.viktor.ui;
 
 import com.plebsscripts.viktor.config.CSVConfigLoader;
+import com.plebsscripts.viktor.config.HotReloader;
 import com.plebsscripts.viktor.config.ItemConfig;
 import com.plebsscripts.viktor.config.Settings;
 import com.plebsscripts.viktor.config.Profiles;
@@ -19,7 +20,7 @@ import java.util.Map;
 
 /**
  * Main GUI for Viktor GE Flipper
- * Features: Profile management, CSV loading, Discord webhook testing, live task queue
+ * Features: Profile management, CSV loading (File OR Pastebin), Discord webhook testing, live task queue
  */
 public class AppGUI {
     private final JFrame frame = new JFrame("Viktor • GE Flipper");
@@ -29,10 +30,21 @@ public class AppGUI {
     private final Map<String, Settings> profiles;
     private final File dataDir;
 
-    // Top controls
+    // Top controls - File mode
     private final JTextField csvPath = new JTextField();
     private final JButton btnBrowse = new JButton("Browse…");
     private final JButton btnLoad = new JButton("Load CSV");
+
+    // Top controls - Pastebin mode
+    private final JTextField pastebinUrl = new JTextField();
+    private final JButton btnTestPastebin = new JButton("Test");
+    private final JButton btnLoadPastebin = new JButton("Load");
+    private final JCheckBox chkAutoReload = new JCheckBox("Auto-reload", false);
+    private final JSpinner reloadInterval = new JSpinner(new SpinnerNumberModel(30, 10, 300, 10));
+    private final JLabel pastebinStatus = new JLabel("");
+    private HotReloader.PastebinReloader pastebinReloader = null;
+
+    // Other controls
     private final JTextField webhook = new JTextField();
     private final JCheckBox chkTop = new JCheckBox("Always on top");
 
@@ -78,7 +90,7 @@ public class AppGUI {
 
     private void initUI() {
         frame.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        frame.setSize(900, 650);
+        frame.setSize(950, 700);
         frame.setLocationRelativeTo(null);
 
         JPanel root = new JPanel(new BorderLayout(10, 10));
@@ -113,25 +125,58 @@ public class AppGUI {
 
         c.gridx = 1;
         c.gridy = 0;
+        c.gridwidth = 2;
         c.weightx = 1.0;
         top.add(profilePanel, c);
+        c.gridwidth = 1; // Reset
 
-        // Row 1: CSV
+        // Row 1: CSV Source (Tabbed: File OR Pastebin)
         c.gridx = 0;
         c.gridy = 1;
         c.weightx = 0;
-        top.add(new JLabel("CSV:"), c);
+        top.add(new JLabel("CSV Source:"), c);
+
+        // Create tabbed panel for File vs Pastebin
+        JTabbedPane csvSourceTabs = new JTabbedPane();
+
+        // === FILE TAB ===
+        JPanel filePanel = new JPanel(new BorderLayout(6, 0));
+        filePanel.add(csvPath, BorderLayout.CENTER);
+
+        JPanel fileBtns = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        fileBtns.add(btnBrowse);
+        fileBtns.add(btnLoad);
+        filePanel.add(fileBtns, BorderLayout.EAST);
+
+        csvSourceTabs.addTab("📁 File", filePanel);
+
+        // === PASTEBIN TAB ===
+        JPanel pastebinPanel = new JPanel(new BorderLayout(6, 0));
+        pastebinUrl.setToolTipText("Paste raw Pastebin URL (e.g., https://pastebin.com/raw/xxxxx)");
+        pastebinPanel.add(pastebinUrl, BorderLayout.CENTER);
+
+        JPanel pastebinBtns = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        pastebinBtns.add(btnTestPastebin);
+        pastebinBtns.add(btnLoadPastebin);
+        pastebinBtns.add(new JLabel("Every"));
+
+        ((JSpinner.NumberEditor) reloadInterval.getEditor()).getTextField().setColumns(4);
+        pastebinBtns.add(reloadInterval);
+        pastebinBtns.add(new JLabel("sec"));
+        pastebinBtns.add(chkAutoReload);
+        pastebinStatus.setForeground(Color.LIGHT_GRAY);
+        pastebinBtns.add(pastebinStatus);
+
+        pastebinPanel.add(pastebinBtns, BorderLayout.EAST);
+
+        csvSourceTabs.addTab("🌐 Pastebin", pastebinPanel);
+
         c.gridx = 1;
         c.gridy = 1;
+        c.gridwidth = 2;
         c.weightx = 1.0;
-        top.add(csvPath, c);
-        JPanel csvBtns = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-        csvBtns.add(btnBrowse);
-        csvBtns.add(btnLoad);
-        c.gridx = 2;
-        c.gridy = 1;
-        c.weightx = 0;
-        top.add(csvBtns, c);
+        top.add(csvSourceTabs, c);
+        c.gridwidth = 1; // Reset
 
         // Row 2: Webhook + AOT + Test button
         c.gridx = 0;
@@ -204,6 +249,7 @@ public class AppGUI {
 
         c.gridx = 1;
         c.gridy = 3;
+        c.gridwidth = 2;
         c.weightx = 1.0;
         top.add(limits, c);
 
@@ -272,6 +318,15 @@ public class AppGUI {
         // Load GP limits
         maxGpPerFlip.setValue(settings.maxGpPerFlip);
         maxGpInFlight.setValue((int) settings.maxGpInFlight);
+
+        // Load Pastebin settings
+        if (settings.hotReload != null) {
+            if (settings.hotReload.pastebinUrl != null && !settings.hotReload.pastebinUrl.isEmpty()) {
+                pastebinUrl.setText(settings.hotReload.pastebinUrl);
+            }
+            chkAutoReload.setSelected(settings.hotReload.enabled);
+            reloadInterval.setValue(settings.hotReload.checkIntervalSeconds);
+        }
     }
 
     private void loadProfile(Settings newSettings) {
@@ -284,6 +339,15 @@ public class AppGUI {
         webhook.setText(newSettings.discordWebhookUrl != null ? newSettings.discordWebhookUrl : "");
         maxGpPerFlip.setValue(newSettings.maxGpPerFlip);
         maxGpInFlight.setValue((int) newSettings.maxGpInFlight);
+
+        // Update Pastebin fields
+        if (newSettings.hotReload != null) {
+            if (newSettings.hotReload.pastebinUrl != null) {
+                pastebinUrl.setText(newSettings.hotReload.pastebinUrl);
+            }
+            chkAutoReload.setSelected(newSettings.hotReload.enabled);
+            reloadInterval.setValue(newSettings.hotReload.checkIntervalSeconds);
+        }
 
         setStatus("Loaded profile: " + profileSelector.getSelectedItem());
         Logs.info("Profile loaded: " + profileSelector.getSelectedItem());
@@ -337,6 +401,7 @@ public class AppGUI {
     private void wireActions() {
         chkTop.addActionListener(e -> frame.setAlwaysOnTop(chkTop.isSelected()));
 
+        // === FILE TAB ACTIONS ===
         btnBrowse.addActionListener((ActionEvent e) -> {
             JFileChooser fc = new JFileChooser(lastCSV != null ? lastCSV.getParentFile() : new File("."));
             fc.setDialogTitle("Select flip CSV or TXT");
@@ -356,6 +421,62 @@ public class AppGUI {
             loadCsv(f);
         });
 
+        // === PASTEBIN TAB ACTIONS ===
+        btnTestPastebin.addActionListener(e -> {
+            String url = pastebinUrl.getText().trim();
+            if (url.isEmpty()) {
+                pastebinStatus.setText("✗ No URL");
+                pastebinStatus.setForeground(Color.RED);
+                return;
+            }
+
+            pastebinStatus.setText("Testing...");
+            pastebinStatus.setForeground(Color.GRAY);
+
+            new Thread(() -> {
+                try {
+                    // Test fetch
+                    String content = com.plebsscripts.viktor.util.HTTPFetcher.fetch(url, 5000);
+
+                    if (content != null && content.contains("item_name")) {
+                        SwingUtilities.invokeLater(() -> {
+                            pastebinStatus.setText("✓ Valid CSV");
+                            pastebinStatus.setForeground(new Color(0, 180, 0));
+                        });
+                    } else {
+                        SwingUtilities.invokeLater(() -> {
+                            pastebinStatus.setText("✗ Not a CSV");
+                            pastebinStatus.setForeground(Color.RED);
+                        });
+                    }
+                } catch (Exception ex) {
+                    SwingUtilities.invokeLater(() -> {
+                        pastebinStatus.setText("✗ Failed: " + ex.getMessage());
+                        pastebinStatus.setForeground(Color.RED);
+                    });
+                }
+            }).start();
+        });
+
+        btnLoadPastebin.addActionListener(e -> {
+            String url = pastebinUrl.getText().trim();
+            if (url.isEmpty()) {
+                setStatus("No Pastebin URL entered");
+                return;
+            }
+
+            loadFromPastebin(url);
+        });
+
+        chkAutoReload.addActionListener(e -> {
+            if (chkAutoReload.isSelected()) {
+                startPastebinReloader();
+            } else {
+                stopPastebinReloader();
+            }
+        });
+
+        // === START/STOP ACTIONS ===
         btnStart.addActionListener(e -> {
             startRequested = true;
             stopRequested = false;
@@ -370,6 +491,10 @@ public class AppGUI {
             btnStart.setEnabled(true);
             btnStop.setEnabled(false);
             setStatus("Stopped.");
+
+            // Stop Pastebin reloader if running
+            stopPastebinReloader();
+            chkAutoReload.setSelected(false);
         });
     }
 
@@ -382,6 +507,95 @@ public class AppGUI {
         } catch (Exception ex) {
             setStatus("Load failed: " + ex.getMessage());
             Logs.warn("CSV load failed: " + ex.getMessage());
+        }
+    }
+
+    /**
+     * Load CSV from Pastebin URL
+     */
+    private void loadFromPastebin(String url) {
+        setStatus("Loading from Pastebin...");
+        pastebinStatus.setText("Loading...");
+        pastebinStatus.setForeground(Color.GRAY);
+
+        new Thread(() -> {
+            try {
+                String content = com.plebsscripts.viktor.util.HTTPFetcher.fetch(url);
+
+                // Parse CSV content
+                File temp = File.createTempFile("viktor_pastebin_", ".csv");
+                temp.deleteOnExit();
+                java.nio.file.Files.write(temp.toPath(), content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+                List<ItemConfig> items = CSVConfigLoader.load(temp.getAbsolutePath());
+                temp.delete();
+
+                // Update table on UI thread
+                SwingUtilities.invokeLater(() -> {
+                    itemsModel.setItems(items);
+                    setStatus("Loaded " + items.size() + " items from Pastebin");
+                    tasksModel.setTasksFromItems(items);
+                    pastebinStatus.setText("✓ Loaded (" + items.size() + " items)");
+                    pastebinStatus.setForeground(new Color(0, 180, 0));
+                });
+
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() -> {
+                    setStatus("Pastebin load failed: " + ex.getMessage());
+                    pastebinStatus.setText("✗ Failed");
+                    pastebinStatus.setForeground(Color.RED);
+                });
+                Logs.warn("Pastebin load failed: " + ex.getMessage());
+            }
+        }).start();
+    }
+
+    /**
+     * Start auto-reloading from Pastebin
+     */
+    private void startPastebinReloader() {
+        String url = pastebinUrl.getText().trim();
+        if (url.isEmpty()) {
+            chkAutoReload.setSelected(false);
+            JOptionPane.showMessageDialog(frame, "Please enter a Pastebin URL first", "Info", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        int intervalSec = ((Number) reloadInterval.getValue()).intValue();
+
+        pastebinReloader = new HotReloader.PastebinReloader(
+                url,
+                new HotReloader.Callback() {
+                    public void onReload(List<ItemConfig> newItems) {
+                        SwingUtilities.invokeLater(() -> {
+                            itemsModel.setItems(newItems);
+                            setStatus("Auto-reloaded " + newItems.size() + " items from Pastebin");
+                            tasksModel.setTasksFromItems(newItems);
+                            pastebinStatus.setText("✓ Auto-reloaded (" + newItems.size() + " items)");
+                            pastebinStatus.setForeground(new Color(0, 180, 0));
+                        });
+                    }
+                },
+                intervalSec * 1000L
+        );
+
+        pastebinReloader.start();
+        setStatus("Auto-reload started (every " + intervalSec + "s)");
+        pastebinStatus.setText("Auto-reloading...");
+        pastebinStatus.setForeground(new Color(100, 150, 255));
+        Logs.info("Pastebin auto-reload started: " + url);
+    }
+
+    /**
+     * Stop auto-reloading
+     */
+    private void stopPastebinReloader() {
+        if (pastebinReloader != null) {
+            pastebinReloader.stop();
+            pastebinReloader = null;
+            setStatus("Auto-reload stopped");
+            pastebinStatus.setText("");
+            Logs.info("Pastebin auto-reload stopped");
         }
     }
 
@@ -462,9 +676,16 @@ public class AppGUI {
         settings.inputPath = csvPath.getText().trim();
         settings.discordWebhookUrl = webhook.getText().trim();
         settings.maxGpPerFlip = ((Number) maxGpPerFlip.getValue()).longValue();
-        settings.maxGpInFlight = ((Number) maxGpInFlight.getValue()).intValue(); // Changed to intValue()
-    }
+        settings.maxGpInFlight = ((Number) maxGpInFlight.getValue()).intValue();
 
+        // Save Pastebin settings
+        if (settings.hotReload == null) {
+            settings.hotReload = new Settings.HotReloadBlock();
+        }
+        settings.hotReload.pastebinUrl = pastebinUrl.getText().trim();
+        settings.hotReload.enabled = chkAutoReload.isSelected();
+        settings.hotReload.checkIntervalSeconds = ((Number) reloadInterval.getValue()).intValue();
+    }
 
     // ===== Task model =====
     public static class TaskRow {

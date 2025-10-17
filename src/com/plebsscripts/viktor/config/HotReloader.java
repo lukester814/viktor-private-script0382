@@ -25,8 +25,8 @@ public class HotReloader implements Runnable {
     }
 
     /**
-     * @param csvPath Path to CSV file to watch
-     * @param callback Called when CSV changes
+     * @param csvPath         Path to CSV file to watch
+     * @param callback        Called when CSV changes
      * @param checkIntervalMs How often to check file (default: 30 seconds)
      */
     public HotReloader(String csvPath, Callback callback, long checkIntervalMs) {
@@ -115,9 +115,7 @@ public class HotReloader implements Runnable {
         Logs.info("HotReloader stopped");
     }
 
-    /**
-     * Future: Load from Pastebin URL instead of file
-     */
+
     /**
      * IMPLEMENTED: Load from Pastebin URL instead of file
      */
@@ -161,7 +159,7 @@ public class HotReloader implements Runnable {
             while (running) {
                 try {
                     // Add jitter (±20%)
-                    long jitter = (long)(checkIntervalMs * 0.2 * (Math.random() * 2 - 1));
+                    long jitter = (long) (checkIntervalMs * 0.2 * (Math.random() * 2 - 1));
                     Thread.sleep(checkIntervalMs + jitter);
 
                     // Fetch from URL
@@ -217,4 +215,5 @@ public class HotReloader implements Runnable {
                 return null;
             }
         }
-    }}
+    }
+}

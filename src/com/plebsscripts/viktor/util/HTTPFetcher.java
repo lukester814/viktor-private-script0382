@@ -10,10 +10,10 @@ import java.nio.charset.StandardCharsets;
 public class HTTPFetcher {
 
     /**
-     * Fetch content from URL with timeout
+     * Fetch content from URL with 10 second timeout
      */
     public static String fetch(String urlString) throws IOException {
-        return fetch(urlString, 10000); // 10 second timeout
+        return fetch(urlString, 10000);
     }
 
     /**
@@ -48,6 +48,18 @@ public class HTTPFetcher {
 
         } finally {
             conn.disconnect();
+        }
+    }
+
+    /**
+     * Test if URL is reachable
+     */
+    public static boolean testUrl(String urlString) {
+        try {
+            fetch(urlString, 5000);
+            return true;
+        } catch (Exception e) {
+            return false;
         }
     }
 }
