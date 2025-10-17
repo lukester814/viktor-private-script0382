@@ -91,8 +91,7 @@ public class MarginProbe {
         }
 
         Logs.info("Buy filled: " + receivedQty + "x " + ic.itemName);
-        ic.lastProbeBuy = buyPrice;
-        ic.lastProbeAt = Instant.now();
+        ic.updateProbe(buyPrice, sellPrice);
 
         // === SELL PHASE ===
         Logs.info("Probe sell: " + receivedQty + "x " + ic.itemName + " @ " + sellPrice + " gp");
@@ -127,8 +126,7 @@ public class MarginProbe {
         }
 
         Logs.info("Sell filled: " + receivedQty + "x " + ic.itemName);
-        ic.lastProbeSell = sellPrice;
-        ic.lastProbeAt = Instant.now();
+        ic.updateProbe(buyPrice, sellPrice);
 
         ge.close();
 

@@ -57,8 +57,12 @@ public class GEOffers {
         }
 
         int targetQty = clampQty(ic.maxQtyPerCycle);
+        if (humanBehavior != null) {
+            targetQty = humanBehavior.maybeAdjustQuantity(targetQty);
+        }
         int placedQty = 0;
-        int buyPrice = ic.estBuy;
+        int buyPrice = ic.getBuyPrice(); // Uses probe data if available
+
 
         // Maybe enter wrong price first (1-2% chance)
         if (humanBehavior != null) {
@@ -201,7 +205,7 @@ public class GEOffers {
             return;
         }
 
-        int sellPrice = ic.estSell;
+        int sellPrice = ic.getSellPrice();
 
         // Maybe wrong price (human mistake)
         if (humanBehavior != null) {

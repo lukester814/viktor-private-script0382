@@ -2,7 +2,7 @@ package com.plebsscripts.viktor.core;
 
 import com.plebsscripts.viktor.config.ItemConfig;
 import com.plebsscripts.viktor.config.Settings;
-import com.plebsscripts.viktor.coord.SafeCoordinator; // Changed from CoordinatorClient
+import com.plebsscripts.viktor.coord.SafeCoordinator;
 import com.plebsscripts.viktor.ge.*;
 import com.plebsscripts.viktor.limits.LimitTracker;
 import com.plebsscripts.viktor.notify.DiscordNotifier;
@@ -31,19 +31,19 @@ public class StateMachine {
     private final Settings settings;
     private final List<ItemConfig> items;
     private List<ItemConfig> workingQueue;
-    private final SafeCoordinator coord; // Changed from CoordinatorClient
+    private final SafeCoordinator coord;
     private final LimitTracker limits;
     private final GENavigator nav;
     private final GEApi ge;
-    private final GEOffers offers; // Added
+    private final GEOffers offers;
     private final MarginProbe probe;
     private final PriceModel price;
     private final InventoryBanking bank;
     private final AntiBan antiBan;
     private final Timers timers;
     private final DiscordNotifier notify;
-    private final ProfitTracker profit; // Added
-    private final HumanBehavior humanBehavior; // Added
+    private final ProfitTracker profit;
+    private final HumanBehavior humanBehavior;
 
     private ItemConfig current;
     private long lastAction;
@@ -82,6 +82,11 @@ public class StateMachine {
 
     public void stop() {
         Logs.info("StateMachine stopped.");
+
+        // ADDED: Reset anti-ban state on stop
+        if (antiBan != null) {
+            antiBan.reset();
+        }
     }
 
     public void updateItemQueue() {
@@ -127,13 +132,13 @@ public class StateMachine {
         switch (phase) {
 
             case IDLE:
-                // Select next item with some think time
-                antiBan.sleep(500, 2000);
+                // IMPROVED: Use Gaussian timing instead of uniform random
+                timers.sleepGaussian(1250, 400); // Mean 1.25s, stddev 400ms
 
                 current = workingQueue.get(rng.nextInt(workingQueue.size()));
                 Logs.info("Selected item: " + current.itemName);
 
-                // Maybe check item details first
+                // Maybe check item details first (human behavior)
                 if (humanBehavior.shouldCheckItemFirst()) {
                     humanBehavior.checkItemDetails(current);
                 }
@@ -146,7 +151,7 @@ public class StateMachine {
                     Logs.info("At GE — checking if probe needed for " + current.itemName);
 
                     // Check if probe is stale
-                    if (probe.isStale(current)) {
+                    if (current.needsProbe(settings.probeStaleMinutes)) {
                         Logs.info("Probe is stale, starting margin check");
                         phase = Phase.PROBE;
                     } else {
@@ -192,8 +197,14 @@ public class StateMachine {
                 } else if (buyResult.isOk()) {
                     Logs.info("✓ Buy orders placed for " + current.itemName);
 
-                    // Wait for offers to fill (human-like check timing)
-                    antiBan.sleep(30_000, 60_000); // 30s-1min
+                    // IMPROVED: Gaussian wait for offers to fill (more human-like)
+                    timers.sleepGaussian(45_000, 10_000); // Mean 45s, stddev 10s
+
+                    // ADDED: Maybe check offers randomly (human behavior)
+                    if (humanBehavior.shouldCheckOffersRandomly()) {
+                        Logs.debug("Checking offers early (random check)");
+                        antiBan.shortPause();
+                    }
 
                     phase = Phase.SELL_BULK;
                 } else {
@@ -245,15 +256,22 @@ public class StateMachine {
                 break;
 
             case COOLDOWN:
-                // Wait before next item (anti-pattern)
-                long cooldownTime = 10_000 + rng.nextInt(20_000); // 10-30s
+                // IMPROVED: Use Gaussian distribution for cooldown (more human-like)
+                timers.sleepGaussian(20_000, 5_000); // Mean 20s, stddev 5s
 
-                Logs.info("Cooldown: " + (cooldownTime / 1000) + "s before next item");
-                antiBan.sleepExact((int) cooldownTime);
+                // ADDED: 2% chance to simulate distraction (looking away)
+                if (humanBehavior != null && rng.nextInt(100) < 2) {
+                    humanBehavior.simulateDistraction();
+                }
 
                 // Maybe take a break
                 if (antiBan.shouldTakeBreak()) {
-                    antiBan.takeShortBreak();
+                    // ADDED: Randomly choose short or medium break
+                    if (rng.nextBoolean()) {
+                        antiBan.takeShortBreak();
+                    } else {
+                        antiBan.takeMediumBreak();
+                    }
                 }
 
                 phase = Phase.ROTATE;
