@@ -311,8 +311,8 @@ public class AppGUI {
         }
 
         // Load discord webhook
-        if (settings.discordWebhookUrl != null) {
-            webhook.setText(settings.discordWebhookUrl);
+        if (settings.discord != null && settings.discord.webhookUrl != null) {
+            webhook.setText(settings.discord.webhookUrl);
         }
 
         // Load GP limits
@@ -336,8 +336,7 @@ public class AppGUI {
 
         // Update all GUI fields
         csvPath.setText(newSettings.inputPath != null ? newSettings.inputPath : "");
-        webhook.setText(newSettings.discordWebhookUrl != null ? newSettings.discordWebhookUrl : "");
-        maxGpPerFlip.setValue(newSettings.maxGpPerFlip);
+        webhook.setText(newSettings.discord != null && newSettings.discord.webhookUrl != null ? newSettings.discord.webhookUrl : "");        maxGpPerFlip.setValue(newSettings.maxGpPerFlip);
         maxGpInFlight.setValue((int) newSettings.maxGpInFlight);
 
         // Update Pastebin fields
@@ -674,7 +673,9 @@ public class AppGUI {
         if (settings == null) return;
 
         settings.inputPath = csvPath.getText().trim();
-        settings.discordWebhookUrl = webhook.getText().trim();
+        if (settings.discord == null) {
+            settings.discord = new Settings.DiscordBlock();}
+        settings.discord.webhookUrl = webhook.getText().trim();
         settings.maxGpPerFlip = ((Number) maxGpPerFlip.getValue()).longValue();
         settings.maxGpInFlight = ((Number) maxGpInFlight.getValue()).intValue();
 
