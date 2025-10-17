@@ -2,6 +2,7 @@ package com.plebsscripts.viktor.ge;
 
 import com.plebsscripts.viktor.util.Logs;
 import org.dreambot.api.methods.grandexchange.GrandExchange;
+import org.dreambot.api.methods.grandexchange.GrandExchangeItem;
 import org.dreambot.api.methods.container.impl.Inventory;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -15,7 +16,7 @@ public class GEApiDreamBotAdapter implements GEApi {
     public static GEApiDreamBotAdapter instance() { return INST; }
 
     private final GEApiDreamBot track = GEApiDreamBot.instance();
-    private final Map<String, Integer> itemToOfferId = new ConcurrentHashMap<>();
+    private final Map<String, Integer> itemToOfferId = new ConcurrentHashMap<String, Integer>();
 
     private GEApiDreamBotAdapter() {}
 
@@ -67,9 +68,7 @@ public class GEApiDreamBotAdapter implements GEApi {
                 return BuyOutcome.PLACED;
             }
 
-            // Check for limit hit (you can enhance this with widget checks)
-            // TODO: Check widgets/chat for "You have reached your limit"
-
+            // Check for limit hit (enhance with widget checks if needed)
             return BuyOutcome.FAILED;
         } catch (Exception e) {
             Logs.warn("placeBuy failed: " + e.getMessage());
@@ -95,7 +94,7 @@ public class GEApiDreamBotAdapter implements GEApi {
             boolean success = GrandExchange.sellItem(itemName, qty, priceEach);
             if (success) {
                 GEApiDreamBot.OfferInfo oi = track.registerOffer(itemName, GEApiDreamBot.Type.SELL, priceEach, qty);
-                itemToOfferId.put(itemName + "_sell", oi.offerId); // Different key for sells
+                itemToOfferId.put(itemName + "_sell", oi.offerId);
                 Logs.info("Sell placed: " + qty + "x " + itemName + " @ " + priceEach + " gp");
                 return SellOutcome.PLACED;
             }
@@ -148,11 +147,11 @@ public class GEApiDreamBotAdapter implements GEApi {
 
     @Override
     public boolean hasStaleSells(String itemName, int staleMinutes) {
-        // Similar logic to hasStaleBuys but for sells
+        // Use getTrackedOffers() to avoid accessing private field
         long threshold = Math.max(1, staleMinutes) * 60L * 1000L;
         long now = System.currentTimeMillis();
 
-        for (GEApiDreamBot.OfferInfo oi : track.trackedOffers.values()) {
+        for (GEApiDreamBot.OfferInfo oi : track.getTrackedOffers()) {
             if (oi.type == GEApiDreamBot.Type.SELL &&
                     oi.itemName.equals(itemName) &&
                     oi.remainingQty > 0 &&
@@ -165,14 +164,11 @@ public class GEApiDreamBotAdapter implements GEApi {
 
     @Override
     public boolean repriceBuys(String itemName, int newPriceEach) {
-        // Cancel existing buy and place new one
         cancelBuys(itemName);
 
         try {
-            // Small delay before repricing
             Thread.sleep(600);
-
-            int qty = 100; // Or get from previous offer
+            int qty = 100;
             BuyOutcome result = placeBuy(itemName, newPriceEach, qty);
 
             if (result == BuyOutcome.PLACED) {
@@ -194,10 +190,12 @@ public class GEApiDreamBotAdapter implements GEApi {
             Logs.info("Cancelled buy: " + itemName + " (offerId=" + id + ")");
         }
 
-        // Also cancel in GE UI if needed
+        // Cancel in GE UI - DreamBot uses GrandExchangeItem
         try {
             for (int slot = 0; slot < 8; slot++) {
-                if (GrandExchange.slotContains(slot, itemName)) {
+                GrandExchangeItem geItem = GrandExchange.getItem(slot);
+                if (geItem != null && geItem.getItem() != null &&
+                        geItem.getItem().getName().equals(itemName)) {
                     GrandExchange.cancelOffer(slot);
                 }
             }
@@ -208,10 +206,11 @@ public class GEApiDreamBotAdapter implements GEApi {
 
     @Override
     public void undercutSells(String itemName, int newSellPrice) {
-        // Cancel and relist
         try {
             for (int slot = 0; slot < 8; slot++) {
-                if (GrandExchange.slotContains(slot, itemName)) {
+                GrandExchangeItem geItem = GrandExchange.getItem(slot);
+                if (geItem != null && geItem.getItem() != null &&
+                        geItem.getItem().getName().equals(itemName)) {
                     GrandExchange.cancelOffer(slot);
                     Thread.sleep(600);
 
@@ -230,9 +229,10 @@ public class GEApiDreamBotAdapter implements GEApi {
     @Override
     public boolean offersComplete(String itemName) {
         try {
-            // Check if any offer for this item is ready to collect
             for (int slot = 0; slot < 8; slot++) {
-                if (GrandExchange.slotContains(slot, itemName) &&
+                GrandExchangeItem geItem = GrandExchange.getItem(slot);
+                if (geItem != null && geItem.getItem() != null &&
+                        geItem.getItem().getName().equals(itemName) &&
                         GrandExchange.isReadyToCollect(slot)) {
                     return true;
                 }

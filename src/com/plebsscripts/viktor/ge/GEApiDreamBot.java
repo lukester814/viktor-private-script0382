@@ -1,5 +1,6 @@
 package com.plebsscripts.viktor.ge;
 
+import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,7 +26,7 @@ public class GEApiDreamBot {
     private static final int DEFAULT_SLOTS = 8;
 
     // Internal registry of offers placed/known by script
-    private final Map<Integer, OfferInfo> trackedOffers = new ConcurrentHashMap<Integer, OfferInfo>();
+    public final Map<Integer, OfferInfo> trackedOffers = new ConcurrentHashMap<Integer, OfferInfo>();
     private final AtomicInteger offerIdGenerator = new AtomicInteger(1);
 
     private GEApiDreamBot() {}
@@ -39,6 +40,10 @@ public class GEApiDreamBot {
         OfferInfo oi = new OfferInfo(id, itemName, type, priceEach, qty, System.currentTimeMillis());
         trackedOffers.put(id, oi);
         return oi;
+    }
+
+    public Collection<OfferInfo> getTrackedOffers() {
+        return trackedOffers.values();
     }
 
     /** Mark an offer as completed/removed (e.g., on sell/buy completion or cancel). */

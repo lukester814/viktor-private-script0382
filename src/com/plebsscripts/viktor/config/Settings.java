@@ -3,6 +3,7 @@ package com.plebsscripts.viktor.config;
 public class Settings {
     // INPUT
     public String inputPath = "data/items.csv";
+    public String discordWebhookUrl = "";  //
 
     // GE / runtime
     public int offerSlots = 8;
@@ -20,7 +21,6 @@ public class Settings {
     public boolean enableCoordinator = false; // CHANGED: Default false for safety
     public String coordinatorUrl = "http://127.0.0.1:8888"; // CHANGED: Match CoordinatorServer default port
     public String botId = "";
-    public String discordWebhookUrl = "";  // ADD THIS
 
     // Discord
     public DiscordBlock discord = new DiscordBlock();
@@ -37,6 +37,17 @@ public class Settings {
         // DEPRECATED: Use webhookUrl instead
         @Deprecated
         public String discordWebhook = "";
+    }
+
+    public String discordWebhook() {
+        // Support legacy field name
+        if (discord != null && discord.webhookUrl != null && !discord.webhookUrl.isEmpty()) {
+            return discord.webhookUrl;
+        }
+        if (discord != null && discord.discordWebhook != null && !discord.discordWebhook.isEmpty()) {
+            return discord.discordWebhook;
+        }
+        return "";
     }
 
     // ADD: Anti-ban settings
