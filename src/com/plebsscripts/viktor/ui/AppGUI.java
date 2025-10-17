@@ -49,10 +49,9 @@ public class AppGUI {
     private final JCheckBox chkTop = new JCheckBox("Always on top");
 
     // Budget / limits
-    private final JSpinner maxGpPerFlip = new JSpinner(new SpinnerNumberModel(250_000, 1_000, 100_000_000, 1_000));
-    private final JCheckBox chkRespectLimits = new JCheckBox("Respect GE limits", true);
-    private final JSpinner maxGpInFlight = new JSpinner(new SpinnerNumberModel(15_000_000, 100_000, 2_000_000_000, 50_000));
-
+// FIXED: Use Integer instead of Long for spinner
+    private final JSpinner maxGpPerFlip = new JSpinner(new SpinnerNumberModel(250000, 1000, 100000000, 1000));    private final JCheckBox chkRespectLimits = new JCheckBox("Respect GE limits", true);
+    private final JSpinner maxGpInFlight = new JSpinner(new SpinnerNumberModel(15000000, 100000, Integer.MAX_VALUE, 50000));
     // Start/Stop + status
     private final JButton btnStart = new JButton("Start");
     private final JButton btnStop = new JButton("Stop");
@@ -316,8 +315,8 @@ public class AppGUI {
         }
 
         // Load GP limits
-        maxGpPerFlip.setValue(settings.maxGpPerFlip);
-        maxGpInFlight.setValue((int) settings.maxGpInFlight);
+        maxGpPerFlip.setValue((int) Math.min(settings.maxGpPerFlip, Integer.MAX_VALUE));
+        maxGpInFlight.setValue((int) Math.min(settings.maxGpInFlight, Integer.MAX_VALUE));
 
         // Load Pastebin settings
         if (settings.hotReload != null) {
@@ -336,8 +335,9 @@ public class AppGUI {
 
         // Update all GUI fields
         csvPath.setText(newSettings.inputPath != null ? newSettings.inputPath : "");
-        webhook.setText(newSettings.discord != null && newSettings.discord.webhookUrl != null ? newSettings.discord.webhookUrl : "");        maxGpPerFlip.setValue(newSettings.maxGpPerFlip);
-        maxGpInFlight.setValue((int) newSettings.maxGpInFlight);
+        webhook.setText(newSettings.discord != null && newSettings.discord.webhookUrl != null ? newSettings.discord.webhookUrl : "");
+        maxGpPerFlip.setValue((int) Math.min(newSettings.maxGpPerFlip, Integer.MAX_VALUE));
+        maxGpInFlight.setValue((int) Math.min(newSettings.maxGpInFlight, Integer.MAX_VALUE));
 
         // Update Pastebin fields
         if (newSettings.hotReload != null) {
@@ -475,14 +475,15 @@ public class AppGUI {
             }
         });
 
-        // === START/STOP ACTIONS ===
         btnStart.addActionListener(e -> {
+            Logs.info("GUI: Start button clicked!"); // ADD THIS
             startRequested = true;
             stopRequested = false;
             btnStart.setEnabled(false);
             btnStop.setEnabled(true);
             setStatus("Running…");
             captureSettings();
+            Logs.info("GUI: startRequested = " + startRequested); // ADD THIS
         });
 
         btnStop.addActionListener(e -> {

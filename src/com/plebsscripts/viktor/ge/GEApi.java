@@ -14,6 +14,7 @@ public interface GEApi {
     SellOutcome placeSell(String itemName, int priceEach, int qtyOrZeroForAll);
 
     void collectAll();
+    void collectIfReady(String itemName);
     boolean inventoryHas(String itemName);
 
     boolean hasStaleBuys(String itemName, int staleMinutes);

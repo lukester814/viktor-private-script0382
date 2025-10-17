@@ -66,6 +66,6 @@ public class Logs {
      */
     private static boolean isDebugEnabled() {
         // Could read from Settings or system property
-        return Boolean.getBoolean("viktor.debug");
+        return true; // temp
     }
 }

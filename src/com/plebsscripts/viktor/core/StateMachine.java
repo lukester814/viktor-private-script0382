@@ -184,27 +184,35 @@ public class StateMachine {
 
                 if (buyResult.hit4hLimit()) {
                     Logs.warn("4h limit hit on " + current.itemName);
-
-                    // Report to coordinator
                     if (coord != null) {
                         coord.reportLimit(current.itemName);
                     }
-
-                    // Move to next item
                     updateItemQueue();
                     phase = Phase.ROTATE;
 
                 } else if (buyResult.isOk()) {
                     Logs.info("✓ Buy orders placed for " + current.itemName);
 
-                    // IMPROVED: Gaussian wait for offers to fill (more human-like)
-                    timers.sleepGaussian(45_000, 10_000); // Mean 45s, stddev 10s
+                    // IMPROVED: Wait for offers with periodic checks
+                    int maxWaitTime = 60000; // 60 seconds max
+                    int checkInterval = 5000; // Check every 5 seconds
+                    int elapsed = 0;
 
-                    // ADDED: Maybe check offers randomly (human behavior)
-                    if (humanBehavior.shouldCheckOffersRandomly()) {
-                        Logs.debug("Checking offers early (random check)");
-                        antiBan.shortPause();
+                    while (elapsed < maxWaitTime) {
+                        timers.sleepGaussian(checkInterval, 1000);
+                        elapsed += checkInterval;
+
+                        // Check if any offers are ready
+                        if (ge.offersComplete(current.itemName)) {
+                            Logs.info("✓ Buy offers completed after " + (elapsed / 1000) + "s");
+                            break;
+                        }
+
+                        Logs.debug("Waiting for buy offers... (" + (elapsed / 1000) + "s)");
                     }
+
+                    // Collect what we have (even if not all filled)
+                    ge.collectIfReady(current.itemName);
 
                     phase = Phase.SELL_BULK;
                 } else {

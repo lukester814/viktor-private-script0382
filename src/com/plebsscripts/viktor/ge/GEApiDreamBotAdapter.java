@@ -13,12 +13,15 @@ import java.util.concurrent.ConcurrentHashMap;
 public class GEApiDreamBotAdapter implements GEApi {
     private static final GEApiDreamBotAdapter INST = new GEApiDreamBotAdapter();
 
-    public static GEApiDreamBotAdapter instance() { return INST; }
+    public static GEApiDreamBotAdapter instance() {
+        return INST;
+    }
 
     private final GEApiDreamBot track = GEApiDreamBot.instance();
     private final Map<String, Integer> itemToOfferId = new ConcurrentHashMap<String, Integer>();
 
-    private GEApiDreamBotAdapter() {}
+    private GEApiDreamBotAdapter() {
+    }
 
     @Override
     public boolean ensureOpen() {
@@ -226,20 +229,76 @@ public class GEApiDreamBotAdapter implements GEApi {
         }
     }
 
+    /// In GEApiDreamBotAdapter.java, replace offersComplete() method:
+
     @Override
     public boolean offersComplete(String itemName) {
         try {
+            boolean anyReady = false;
+
             for (int slot = 0; slot < 8; slot++) {
                 GrandExchangeItem geItem = GrandExchange.getItem(slot);
-                if (geItem != null && geItem.getItem() != null &&
-                        geItem.getItem().getName().equals(itemName) &&
-                        GrandExchange.isReadyToCollect(slot)) {
-                    return true;
+
+                if (geItem == null) continue;
+
+                // Check if this slot has our item
+                if (geItem.getItem() != null &&
+                        geItem.getItem().getName().equals(itemName)) {
+
+                    // Check if ready to collect (green checkmark)
+                    if (GrandExchange.isReadyToCollect(slot)) {
+                        Logs.info("Offer slot " + slot + " ready to collect: " + itemName);
+                        anyReady = true;
+                    } else {
+                        Logs.debug("Offer slot " + slot + " still pending: " + itemName);
+                    }
                 }
             }
-            return false;
+
+            return anyReady;
+
         } catch (Exception e) {
+            Logs.warn("offersComplete() error: " + e.getMessage());
             return false;
+        }
+    }
+
+    // Add this new method to force collection check:
+    public void collectIfReady(String itemName) {
+        try {
+            if (!GrandExchange.isOpen()) {
+                GrandExchange.open();
+                org.dreambot.api.utilities.Sleep.sleepUntil(() -> GrandExchange.isOpen(), 3000);
+            }
+
+            boolean collected = false;
+
+            for (int slot = 0; slot < 8; slot++) {
+                if (GrandExchange.isReadyToCollect(slot)) {
+                    GrandExchangeItem geItem = GrandExchange.getItem(slot);
+
+                    if (geItem != null && geItem.getItem() != null) {
+                        String item = geItem.getItem().getName();
+
+                        if (item.equals(itemName) || itemName == null) {
+                            Logs.info("Collecting from slot " + slot + ": " + item);
+
+                            // FIXED: Use collectAll() instead of collect(slot)
+                            GrandExchange.collect();
+                            org.dreambot.api.utilities.Sleep.sleep(600, 1000);
+                            collected = true;
+                            break; // Collect one at a time to avoid issues
+                        }
+                    }
+                }
+            }
+
+            if (!collected) {
+                Logs.debug("No ready offers found for: " + itemName);
+            }
+
+        } catch (Exception e) {
+            Logs.warn("collectIfReady() error: " + e.getMessage());
         }
     }
 }

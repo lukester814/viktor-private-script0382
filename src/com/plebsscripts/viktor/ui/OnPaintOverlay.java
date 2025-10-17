@@ -4,284 +4,199 @@ import com.plebsscripts.viktor.core.StateMachine;
 import com.plebsscripts.viktor.core.ProfitTracker;
 import com.plebsscripts.viktor.config.ItemConfig;
 import com.plebsscripts.viktor.limits.LimitTracker;
+import com.plebsscripts.viktor.util.Logs;
+import org.dreambot.api.methods.widget.Widgets;
+import org.dreambot.api.wrappers.widgets.WidgetChild;
 
 import java.awt.*;
+import java.awt.image.BufferedImage;
 import java.time.Duration;
 import java.time.Instant;
 import java.text.DecimalFormat;
 
 /**
- * Ultra-modern overlay with gradient header, icons, and glassmorphism
- * Optimized for readability and visual appeal
+ * Custom Viktor paint anchored to game interface
+ * Similar style to Plebs CRABS
  */
 public class OnPaintOverlay {
     private final StateMachine state;
     private final ProfitTracker profit;
     private final LimitTracker limits;
+    private final long startTime = System.currentTimeMillis();
 
     private final DecimalFormat df0 = new DecimalFormat("#,##0");
 
-    // Layout constants
-    private int x = 12, y = 60, w = 380;
-    private int line = 20, pad = 12;
-    private static final int RADIUS = 16;
+    // Fonts
+    private final Font headerFont = new Font("Verdana", Font.BOLD, 27);
+    private final Font subHeaderFont = new Font("Verdana", Font.BOLD, 14);
+    private final Font dataFont = new Font("Verdana", Font.PLAIN, 12);
 
-    // Modern color palette (Discord-inspired with enhancements)
-    private static final Color BG_DARK = new Color(20, 22, 35, 220);
-    private static final Color HEADER_START = new Color(88, 101, 242, 230);
-    private static final Color HEADER_END = new Color(128, 90, 213, 230);
-    private static final Color TEXT_LIGHT = new Color(250, 252, 255);
-    private static final Color TEXT_MUTED = new Color(180, 188, 210);
-    private static final Color SEPARATOR = new Color(255, 255, 255, 22);
-    private static final Color GREEN = new Color(76, 191, 140);
-    private static final Color RED = new Color(237, 85, 101);
-    private static final Color YELLOW = new Color(255, 188, 66);
-    private static final Color BLUE = new Color(103, 158, 255);
+    // Colors
+    private final Color headerWhite = new Color(255, 255, 255);
+    private final Color headerGold = new Color(225, 188, 23);
+    private final Color dataColor = Color.BLACK;
 
-    // Fonts (with fallback chain)
-    private Font headerFont;
-    private Font bodyFont;
-    private Font boldFont;
+    // Background (optional - can load image or draw rectangle)
+    private BufferedImage background = null;
 
     public OnPaintOverlay(StateMachine state, ProfitTracker profit, LimitTracker limits) {
         this.state = state;
         this.profit = profit;
         this.limits = limits;
-        initFonts();
+
+        // Load custom background image
+        loadBackgroundImage();
     }
 
-    private void initFonts() {
-        // Try Inter → Segoe UI → System default
-        String[] fontNames = {"Inter", "Segoe UI", "Arial", "Sans-serif"};
-        String availableFont = "Dialog";
+    /**
+     * Load background image from file
+     * Tries multiple locations:
+     * 1. data/paint_bg.png (recommended)
+     * 2. ~/Downloads/paint_bg.png
+     * 3. ./paint_bg.png (script folder)
+     */
+    private void loadBackgroundImage() {
+        String[] imagePaths = {
+                "data/paint_bg.png",                                    // Recommended location
+                System.getProperty("user.home") + "/Downloads/paint_bg.png", // Your Downloads folder
+                "paint_bg.png"                                          // Script folder
+        };
 
-        GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
-        String[] systemFonts = ge.getAvailableFontFamilyNames();
-
-        for (String fontName : fontNames) {
-            for (String systemFont : systemFonts) {
-                if (systemFont.equalsIgnoreCase(fontName)) {
-                    availableFont = fontName;
-                    break;
+        for (String path : imagePaths) {
+            try {
+                java.io.File imgFile = new java.io.File(path);
+                if (imgFile.exists()) {
+                    background = javax.imageio.ImageIO.read(imgFile);
+                    Logs.info("Loaded paint background from: " + path);
+                    return;
                 }
+            } catch (Exception e) {
+                // Try next path
             }
-            if (!availableFont.equals("Dialog")) break;
         }
 
-        headerFont = new Font(availableFont, Font.BOLD, 14);
-        bodyFont = new Font(availableFont, Font.PLAIN, 12);
-        boldFont = new Font(availableFont, Font.BOLD, 12);
+        Logs.info("No custom background image found - using solid background");
     }
 
     public void paint(Graphics g) {
         Graphics2D g2 = (Graphics2D) g;
-
-        // Ultra-smooth rendering
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-        g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
 
-        // Get current data
-        ItemConfig cur = state.getCurrentItem();
-        String phaseVal = formatPhase(state.getPhase());
-        String itemVal = (cur == null ? "—" : cur.itemName);
+        // Try to anchor to widget (like inventory or chat box)
+        int posX = 10; // Default fallback
+        int posY = 345; // Default fallback
 
-        int buy = cur == null ? 0 : cur.getBuyPrice();
-        int sell = cur == null ? 0 : cur.getSellPrice();
-        int margin = sell - buy; // Can be negative
-
-        String priceVal = (buy == 0 && sell == 0) ? "—" :
-                (df0.format(buy) + " → " + df0.format(sell));
-        String marginVal;
-        if (margin > 0) {
-            marginVal = "+" + df0.format(margin) + " gp";
-        } else if (margin < 0) {
-            marginVal = df0.format(margin) + " gp"; // Negative sign included
-        } else {
-            marginVal = "—";
+        try {
+            // Try to anchor to chat box (widget 162)
+            WidgetChild widget = Widgets.getWidgetChild(162, 0);
+            if (widget != null && widget.isVisible()) {
+                posX = widget.getX();
+                posY = widget.getY();
+            }
+        } catch (Exception e) {
+            // Use defaults if widget not found
         }
 
-        Instant probeAt = (cur == null ? null : cur.lastProbeAt);
-        String probeVal = (probeAt == null) ? "Never" : humanAge(Duration.between(probeAt, Instant.now()));
+        // Draw background image (if loaded)
+        if (background != null) {
+            g2.drawImage(background, posX, posY, null);
+        }
 
-        String profitVal = formatGp(profit.getRealizedGp());
-        String gphVal = formatGp(profit.getGpPerHour()) + "/h";
-        String rtVal = profit.prettyRuntime();
-        String blockedVal = limits != null ? String.valueOf(limits.getBlockedCount()) : "—";
+        // ALWAYS draw semi-transparent overlay for readability
+        g2.setColor(new Color(0, 0, 0, 200)); // Black with 78% opacity
+        g2.fillRoundRect(posX, posY, 500, 160, 15, 15);
 
-        // Calculate dynamic height
-        int rows = limits != null ? 9 : 8;
-        int h = (rows * line) + (pad * 2) + 32;
+        // Gold border (Plebs theme)
+        g2.setColor(new Color(225, 188, 23, 220));
+        g2.setStroke(new BasicStroke(3));
+        g2.drawRoundRect(posX, posY, 500, 160, 15, 15);
 
-        // Enhanced shadow with blur effect
-        drawEnhancedShadow(g2, x, y, w, h);
+        // Inner shadow for depth
+        g2.setColor(new Color(0, 0, 0, 100));
+        g2.setStroke(new BasicStroke(1));
+        g2.drawRoundRect(posX + 2, posY + 2, 496, 156, 13, 13);
 
-        // Draw glassmorphism background
-        drawGlassBackground(g2, x, y, w, h);
-
-        // Draw gradient header
-        drawGradientHeader(g2, x, y, w);
-
-        // Header text with icon
+        // === HEADER ===
         g2.setFont(headerFont);
-        g2.setColor(Color.WHITE);
-        g2.drawString("⚡ Viktor", x + pad, y + 21);
+        g2.setColor(headerWhite);
+        g2.drawString("Plebs", posX + 5, posY - 5);
+        g2.setColor(headerGold);
+        g2.drawString("VIKTOR", posX + 80, posY - 5);
 
-        // Draw content rows
-        int bx = x + pad, by = y + 32 + pad, bw = w - pad * 2;
-        g2.setFont(bodyFont);
+        g2.setColor(headerWhite);
+        g2.setFont(subHeaderFont);
+        g2.drawString("GE Flipper", posX + 260, posY - 4);
 
-        drawIconRow(g2, bx, by, bw, "🔄", "Phase", phaseVal, getPhaseColor(state.getPhase()));
-        by += line;
-        drawSeparator(g2, bx, by - 9, bw);
+        // === DATA SECTION ===
+        g2.setFont(dataFont);
+        g2.setColor(Color.WHITE); // Changed from BLACK to WHITE for readability
 
-        drawIconRow(g2, bx, by, bw, "📦", "Item", itemVal, TEXT_LIGHT);
-        by += line;
-        drawSeparator(g2, bx, by - 9, bw);
+        // Column 1 - General Stats
+        int col1X = posX + 15;
+        int col1Y = posY + 30;
 
-        drawIconRow(g2, bx, by, bw, "💰", "Prices", priceVal, TEXT_LIGHT);
-        by += line;
-        drawSeparator(g2, bx, by - 9, bw);
+        g2.drawString("Runtime: " + formatElapsed(System.currentTimeMillis() - startTime), col1X, col1Y);
+        g2.drawString("Total Profit: " + formatGp(profit.getRealizedGp()), col1X, col1Y + 25);
+        g2.drawString("GP/Hour: " + formatGp(profit.getGpPerHour()), col1X, col1Y + 50);
 
-        Color marginColor = margin > 0 ? GREEN : (margin < 0 ? RED : TEXT_LIGHT);
-        drawIconRow(g2, bx, by, bw, "📊", "Margin", marginVal, marginColor);
-        by += line;
-        drawSeparator(g2, bx, by - 9, bw);
+        // Column 2 - Trade Stats
+        int col2X = posX + 200;
+        int col2Y = posY + 30;
 
-        drawIconRow(g2, bx, by, bw, "🔍", "Probe", probeVal, TEXT_MUTED);
-        by += line;
-        drawSeparator(g2, bx, by - 9, bw);
+        g2.drawString("Buys: " + profit.getTotalBuys(), col2X, col2Y);
+        g2.drawString("Sells: " + profit.getTotalSells(), col2X, col2Y + 25);
+        g2.drawString("Items: " + (state != null ? getItemCount() : "0"), col2X, col2Y + 50);
 
-        // Optional: Show blocked items
-        if (limits != null) {
-            Color blockedColor = limits.getBlockedCount() > 0 ? YELLOW : TEXT_LIGHT;
-            drawIconRow(g2, bx, by, bw, "🚫", "Blocked", blockedVal, blockedColor);
-            by += line;
-            drawSeparator(g2, bx, by - 9, bw);
+        // Column 3 - Current Status
+        int col3X = posX + 350;
+        int col3Y = posY + 30;
+
+        ItemConfig cur = state != null ? state.getCurrentItem() : null;
+        String phase = state != null ? formatPhase(state.getPhase()) : "Idle";
+        String item = cur != null ? cur.itemName : "—";
+
+        g2.drawString("Phase: " + phase, col3X, col3Y);
+        g2.drawString("Item: " + truncate(item, 15), col3X, col3Y + 25);
+
+        if (limits != null && limits.getBlockedCount() > 0) {
+            g2.setColor(new Color(255, 150, 0));
+            g2.drawString("Blocked: " + limits.getBlockedCount(), col3X, col3Y + 50);
+        } else {
+            g2.setColor(new Color(0, 200, 0));
+            g2.drawString("All clear", col3X, col3Y + 50);
         }
 
-        // Profit section with emphasis
-        long totalProfit = profit.getRealizedGp();
-        Color profitColor = totalProfit > 0 ? GREEN : (totalProfit < 0 ? RED : TEXT_LIGHT);
-        g2.setFont(boldFont);
-        drawIconRow(g2, bx, by, bw, "💎", "Profit", profitVal, profitColor);
-        g2.setFont(bodyFont);
-        by += line;
-        drawSeparator(g2, bx, by - 9, bw);
+        // Bottom row - Current margin
+        g2.setColor(Color.WHITE); // WHITE for readability
+        int bottomY = posY + 130;
 
-        drawIconRow(g2, bx, by, bw, "⚡", "Rate", gphVal, BLUE);
-        by += line;
-        drawSeparator(g2, bx, by - 9, bw);
+        if (cur != null) {
+            int margin = cur.getSellPrice() - cur.getBuyPrice();
+            String marginStr = margin >= 0 ? "+" + df0.format(margin) : df0.format(margin);
+            Color marginColor = margin > 0 ? new Color(0, 150, 0) : new Color(200, 0, 0);
 
-        drawIconRow(g2, bx, by, bw, "⏱️", "Runtime", rtVal, TEXT_LIGHT);
-    }
-
-    private void drawGlassBackground(Graphics2D g2, int x, int y, int w, int h) {
-        // Main background
-        g2.setColor(BG_DARK);
-        g2.fillRoundRect(x, y, w, h, RADIUS, RADIUS);
-
-        // Subtle highlight (glassmorphism effect)
-        int highlightHeight = h / 3;
-        GradientPaint highlight = new GradientPaint(
-                x, y, new Color(255, 255, 255, 18),
-                x, (float)(y + highlightHeight), new Color(255, 255, 255, 0)
-        );
-        g2.setPaint(highlight);
-        g2.fillRoundRect(x, y, w, highlightHeight, RADIUS, RADIUS);
-        g2.fillRect(x, y + RADIUS, w, highlightHeight - RADIUS);
-    }
-
-    private void drawGradientHeader(Graphics2D g2, int x, int y, int w) {
-        int headerH = 32;
-
-        // Gradient background
-        GradientPaint gradient = new GradientPaint(
-                x, y, HEADER_START,
-                x + w, y, HEADER_END
-        );
-        g2.setPaint(gradient);
-        g2.fillRoundRect(x, y, w, headerH, RADIUS, RADIUS);
-        g2.fillRect(x, y + headerH - RADIUS, w, RADIUS);
-
-        // Shine effect on top edge
-        g2.setColor(new Color(255, 255, 255, 40));
-        g2.fillRoundRect(x, y, w, 2, RADIUS, RADIUS);
-    }
-
-    private void drawEnhancedShadow(Graphics2D g2, int sx, int sy, int sw, int sh) {
-        // Multi-layer shadow for depth
-        for (int i = 0; i < 12; i++) {
-            int alpha = (int)(25 - (i * 2.0));
-            if (alpha < 0) alpha = 0;
-
-            g2.setColor(new Color(0, 0, 0, alpha));
-            int offset = i / 2;
-            g2.fillRoundRect(sx + offset, sy + offset + 2, sw, sh, RADIUS, RADIUS);
+            g2.drawString("Current Margin: ", col1X, bottomY);
+            g2.setColor(marginColor);
+            g2.setFont(new Font("Verdana", Font.BOLD, 13));
+            g2.drawString(marginStr + " gp", col1X + 110, bottomY);
         }
     }
 
-    private void drawIconRow(Graphics2D g2, int bx, int by, int bw, String icon, String label, String value, Color valueColor) {
-        // Icon
-        g2.setColor(TEXT_MUTED);
-        g2.drawString(icon, bx, by);
+    // === Helper Methods ===
 
-        // Label
-        g2.setColor(TEXT_MUTED);
-        g2.drawString(label, bx + 22, by);
+    private String formatElapsed(long ms) {
+        long seconds = ms / 1000;
+        long minutes = seconds / 60;
+        long hours = minutes / 60;
 
-        // Value (right-aligned)
-        g2.setColor(valueColor);
-        FontMetrics fm = g2.getFontMetrics();
-        int vx = bx + bw - fm.stringWidth(value);
-        g2.drawString(value, vx, by);
-    }
+        minutes %= 60;
+        seconds %= 60;
 
-    private void drawSeparator(Graphics2D g2, int bx, int y, int bw) {
-        g2.setColor(SEPARATOR);
-        g2.fillRect(bx, y, bw, 1);
-    }
-
-    private String humanAge(Duration d) {
-        long m = Math.max(0, d.toMinutes());
-        if (m < 1) return "Just now";
-        if (m < 60) return m + "m ago";
-        long h = m / 60, r = m % 60;
-        if (h < 24) return h + "h " + r + "m";
-        long days = h / 24;
-        return days + "d ago";
-    }
-
-    private String formatPhase(Object phase) {
-        if (phase == null) return "—";
-        String p = phase.toString();
-
-        // Friendly names
-        switch (p) {
-            case "IDLE": return "Idle";
-            case "WALK_TO_GE": return "Walking";
-            case "PROBE": return "Probing";
-            case "BUY_BULK": return "Buying";
-            case "SELL_BULK": return "Selling";
-            case "BANKING": return "Banking";
-            case "COOLDOWN": return "Cooldown";
-            case "ROTATE": return "Rotating";
-            default: return p;
+        if (hours > 0) {
+            return String.format("%02d:%02d:%02d", hours, minutes, seconds);
         }
-    }
-
-    private Color getPhaseColor(Object phase) {
-        if (phase == null) return TEXT_LIGHT;
-        String p = phase.toString();
-
-        switch (p) {
-            case "PROBE": return YELLOW;
-            case "BUY_BULK": return BLUE;
-            case "SELL_BULK": return GREEN;
-            case "BANKING": return new Color(148, 103, 189);
-            case "COOLDOWN": return TEXT_MUTED;
-            default: return TEXT_LIGHT;
-        }
+        return String.format("%02d:%02d", minutes, seconds);
     }
 
     private String formatGp(long gp) {
@@ -295,35 +210,33 @@ public class OnPaintOverlay {
         return df0.format(gp);
     }
 
-    // === Optional Customization Methods (can be called from Viktor.java) ===
+    private String formatPhase(Object phase) {
+        if (phase == null) return "Idle";
+        String p = phase.toString();
 
-    /**
-     * Set overlay position (top-left corner)
-     * @param x X coordinate
-     * @param y Y coordinate
-     */
-    @SuppressWarnings("unused") // Public API for customization
-    public void setPosition(int x, int y) {
-        this.x = x;
-        this.y = y;
+        switch (p) {
+            case "IDLE": return "Idle";
+            case "WALK_TO_GE": return "Walking";
+            case "PROBE": return "Probing";
+            case "BUY_BULK": return "Buying";
+            case "SELL_BULK": return "Selling";
+            case "BANKING": return "Banking";
+            case "COOLDOWN": return "Cooldown";
+            case "ROTATE": return "Rotating";
+            default: return p;
+        }
     }
 
-    /**
-     * Set overlay width
-     * @param width Width in pixels
-     */
-    @SuppressWarnings("unused") // Public API for customization
-    public void setWidth(int width) {
-        this.w = width;
+    private String truncate(String str, int maxLen) {
+        if (str == null) return "—";
+        return str.length() > maxLen ? str.substring(0, maxLen) + "..." : str;
     }
 
-    /**
-     * Enable compact mode (smaller spacing)
-     * @param compact True for compact mode
-     */
-    @SuppressWarnings("unused") // Public API for customization
-    public void setCompactMode(boolean compact) {
-        this.line = compact ? 16 : 20;
-        this.pad = compact ? 8 : 12;
+    private int getItemCount() {
+        try {
+            return state.getCurrentItem() != null ? 1 : 0;
+        } catch (Exception e) {
+            return 0;
+        }
     }
 }
