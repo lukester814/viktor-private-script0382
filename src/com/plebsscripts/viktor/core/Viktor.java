@@ -2,6 +2,7 @@ package com.plebsscripts.viktor.core;
 
 import com.plebsscripts.viktor.config.*;
 import com.plebsscripts.viktor.coord.CoordinatorClient;
+import com.plebsscripts.viktor.coord.SafeCoordinator;
 import com.plebsscripts.viktor.ge.*;
 import com.plebsscripts.viktor.limits.*;
 import com.plebsscripts.viktor.notify.DiscordNotifier;
@@ -41,20 +42,21 @@ public class Viktor extends AbstractScript {
 
         // Load settings and CSV
         settings = SettingsStore.loadOrDefault(dataDir);
-        List<ItemConfig> items = CSVConfigLoader.load(settings.inputPath);
-        Logs.info("Loaded " + items.size() + " items from CSV");
+
+        // IMPROVED: Load and personalize configs
+        List<ItemConfig> rawItems = CSVConfigLoader.load(settings.inputPath);
+        List<ItemConfig> items = ConfigPersonalizer.personalizeForAccount(rawItems, settings.getAccountName());
+        items = ConfigPersonalizer.filterUnprofitable(items);
+
+        Logs.info("Loaded " + items.size() + " personalized items for " + settings.getAccountName());
 
         // Load profiles
         Map<String, Settings> profiles = Profiles.loadAll(dataDir);
-        Profiles.createDefaultIfNeeded(dataDir); // Create default if none exist
+        Profiles.createDefaultIfNeeded(dataDir);
 
-        // Setup coordinator (if enabled)
-        CoordinatorClient coord = settings.enableCoordinator ?
-                new CoordinatorClient(settings.coordinatorUrl) : null;
-
-        if (coord != null) {
-            Logs.info("Coordinator enabled: " + settings.coordinatorUrl);
-        }
+        // IMPROVED: Use SafeCoordinator instead of network coordinator
+        SafeCoordinator coord = new SafeCoordinator(settings.getAccountName());
+        Logs.info("Using local coordinator (no network calls)");
 
         // Get GE API adapter
         GEApiDreamBotAdapter geAdapter = GEApiDreamBotAdapter.instance();
@@ -67,22 +69,30 @@ public class Viktor extends AbstractScript {
 
         Logs.info("Waiting for user to press Start...");
         gui.waitUntilStart();
-        gui.captureSettings(); // Capture any GUI changes
+        gui.captureSettings();
 
-        // Setup hot reloader for CSV changes
-        hotReloader = new HotReloader(settings.inputPath, newItems -> {
-            Logs.info("CSV reloaded - updating " + newItems.size() + " items");
+        // Setup hot reloader with improved timing
+        hotReloader = new HotReloader(settings.inputPath, new HotReloader.Callback() {
+            public void onReload(List<ItemConfig> newItems) {
+                Logs.info("CSV reloaded - personalizing " + newItems.size() + " items");
 
-            // Update StateMachine
-            if (state != null) {
-                state.updateItems(newItems);
+                // Personalize new items
+                List<ItemConfig> personalized = ConfigPersonalizer.personalizeForAccount(
+                        newItems, settings.getAccountName()
+                );
+                personalized = ConfigPersonalizer.filterUnprofitable(personalized);
+
+                // Update StateMachine
+                if (state != null) {
+                    state.updateItems(personalized);
+                }
+
+                // Update GUI table
+                if (gui != null && tm != null) {
+                    tm.setItems(personalized);
+                }
             }
-
-            // Update GUI table
-            if (gui != null && tm != null) {
-                tm.setItems(newItems);
-            }
-        }, 30000); // Check every 30 seconds
+        }, 30000);
 
         hotReloader.start();
         Logs.info("Hot reloader started");
@@ -94,32 +104,43 @@ public class Viktor extends AbstractScript {
 
         GENavigator nav = new GENavigator();
         GEOffers offers = new GEOffers(geAdapter, notify);
+
+        // IMPROVED: Initialize AntiBan with settings
+        AntiBan antiBan = new AntiBan(settings);
+
+        // IMPROVED: Initialize HumanBehavior
+        HumanBehavior humanBehavior = new HumanBehavior(antiBan);
+
+        // Wire HumanBehavior into GEOffers
+        offers.setHumanBehavior(humanBehavior);
+        offers.setAntiBan(antiBan);
+        offers.setProfitTracker(profit);
+
         MarginProbe probe = new MarginProbe(settings, geAdapter, notify, profit);
         PriceModel price = new PriceModel();
         InventoryBanking bank = new InventoryBanking();
-
-        // FIX: Pass Settings to AntiBan constructor
-        AntiBan antiBan = new AntiBan(settings);
         Timers timers = new Timers();
 
-        // FIX: StateMachine needs ProfitTracker as last parameter
+        // Create state machine
         state = new StateMachine(
                 settings, items, coord, limits,
                 nav, offers, probe, price, bank,
-                antiBan, timers, notify, profit  // ADD profit here!
+                antiBan, timers, notify, profit
         );
 
         // Setup overlay
-        overlay = new com.plebsscripts.viktor.ui.OnPaintOverlay(state, profit);
+        overlay = new com.plebsscripts.viktor.ui.OnPaintOverlay(state, profit, limits);
 
         // Start state machine
         state.start();
 
         Logs.info("Viktor initialized successfully!");
         Logs.info("═══════════════════════════════════════");
-        Logs.info("  Items: " + items.size());
-        Logs.info("  Coordinator: " + (coord != null ? "Enabled" : "Disabled"));
+        Logs.info("  Items: " + items.size() + " (personalized)");
+        Logs.info("  Coordinator: Local (safe mode)");
         Logs.info("  Discord: " + (notify != null ? "Enabled" : "Disabled"));
+        Logs.info("  Anti-Ban: Enhanced Gaussian timing");
+        Logs.info("  Human Behavior: Mistake simulation enabled");
         Logs.info("═══════════════════════════════════════");
     }
 

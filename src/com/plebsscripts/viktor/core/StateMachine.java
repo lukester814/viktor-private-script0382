@@ -3,6 +3,7 @@ package com.plebsscripts.viktor.core;
 import com.plebsscripts.viktor.config.ItemConfig;
 import com.plebsscripts.viktor.config.Settings;
 import com.plebsscripts.viktor.coord.CoordinatorClient;
+import com.plebsscripts.viktor.coord.SafeCoordinator;
 import com.plebsscripts.viktor.ge.*;
 import com.plebsscripts.viktor.ge.GEApiDreamBotAdapter;
 import com.plebsscripts.viktor.ge.GEApi;
@@ -31,7 +32,7 @@ public class StateMachine {
     private final Settings settings;
     private final List<ItemConfig> items;
     private List<ItemConfig> workingQueue;  // Add this for filtered items
-    private final CoordinatorClient coord;
+    private final SafeCoordinator coord;
     private final LimitTracker limits;
     private final GENavigator nav;
     private final GEApi ge;
@@ -46,7 +47,7 @@ public class StateMachine {
     private long lastAction;
     private final Random rng = new Random();
 
-    public StateMachine(Settings s, List<ItemConfig> it, CoordinatorClient c, LimitTracker lt,
+    public StateMachine(Settings s, List<ItemConfig> it, SafeCoordinator c, LimitTracker lt,
                         GENavigator n, GEOffers o, MarginProbe p, PriceModel pm,
                         InventoryBanking b, AntiBan ab, Timers t, DiscordNotifier dn) {
         this.settings = s;
@@ -81,11 +82,11 @@ public class StateMachine {
             return;
         }
 
-        Set<String> globalBlocked = coord.getBlockedItems();
+        Set<String> localBlocked = coord.getBlockedItems();
         workingQueue = new ArrayList<ItemConfig>();
 
         for (ItemConfig ic : items) {
-            if (!globalBlocked.contains(ic.itemName)) {
+            if (!localBlocked.contains(ic.itemName)) {
                 workingQueue.add(ic);
             }
         }

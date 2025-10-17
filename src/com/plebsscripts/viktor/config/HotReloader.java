@@ -3,6 +3,7 @@ package com.plebsscripts.viktor.config;
 import com.plebsscripts.viktor.util.Logs;
 import java.io.File;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -51,6 +52,18 @@ public class HotReloader implements Runnable {
 
     @Override
     public void run() {
+        // Generate account-specific check interval
+        String accountId = csvPath; // Use file path as seed
+        long seed = accountId.hashCode();
+        Random accountRng = new Random(seed);
+
+        // Each bot has slightly different check interval (±30%)
+        long baseInterval = checkIntervalMs;
+        long accountVariance = (long) (baseInterval * 0.3 * accountRng.nextDouble());
+        long accountInterval = baseInterval + accountVariance;
+
+        Logs.info("HotReloader: Check interval = " + accountInterval + "ms");
+
         // Initial load
         File file = new File(csvPath);
         if (file.exists()) {
@@ -59,7 +72,11 @@ public class HotReloader implements Runnable {
 
         while (running) {
             try {
-                Thread.sleep(checkIntervalMs);
+                // Add jitter to each check (±20%)
+                long jitter = (long) (accountInterval * 0.2 * (Math.random() * 2 - 1));
+                long actualWait = accountInterval + jitter;
+
+                Thread.sleep(actualWait);
 
                 if (!file.exists()) {
                     Logs.warn("CSV file not found: " + csvPath);
@@ -69,6 +86,11 @@ public class HotReloader implements Runnable {
                 long currentModified = file.lastModified();
 
                 if (currentModified > lastModified.get()) {
+                    // Don't reload immediately - add human delay
+                    long humanDelay = 2000 + (long) (Math.random() * 5000); // 2-7 seconds
+                    Logs.info("CSV changed, waiting " + (humanDelay / 1000) + "s before reload...");
+                    Thread.sleep(humanDelay);
+
                     Logs.info("CSV changed, reloading...");
 
                     List<ItemConfig> newItems = CSVConfigLoader.load(csvPath);
