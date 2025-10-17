@@ -3,7 +3,6 @@ package com.plebsscripts.viktor.config;
 public class Settings {
     // INPUT
     public String inputPath = "data/items.csv";
-    public String discordWebhookUrl = "";  //
 
     // GE / runtime
     public int offerSlots = 8;
