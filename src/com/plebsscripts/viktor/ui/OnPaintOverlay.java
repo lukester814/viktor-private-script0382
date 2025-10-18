@@ -17,7 +17,7 @@ import java.text.DecimalFormat;
 
 /**
  * Custom Viktor paint anchored to game interface
- * Similar style to Plebs CRABS
+ * Similar style to me
  */
 public class OnPaintOverlay {
     private final StateMachine state;
