@@ -5,6 +5,7 @@ import com.plebsscripts.viktor.core.ProfitTracker;
 import com.plebsscripts.viktor.config.ItemConfig;
 import com.plebsscripts.viktor.limits.LimitTracker;
 import com.plebsscripts.viktor.util.Logs;
+import org.dreambot.api.methods.widget.Widget;
 import org.dreambot.api.methods.widget.Widgets;
 import org.dreambot.api.wrappers.widgets.WidgetChild;
 
@@ -88,11 +89,15 @@ public class OnPaintOverlay {
         int posY = 345; // Default fallback
 
         try {
-            // Try to anchor to chat box (widget 162)
-            WidgetChild widget = Widgets.getWidgetChild(162, 0);
-            if (widget != null && widget.isVisible()) {
-                posX = widget.getX();
-                posY = widget.getY();
+            // CORRECT: Use Widgets.getWidget() which returns Widget class
+            // Then call getChild() on it to get WidgetChild
+            Widget chatWidget = Widgets.getWidget(162);
+            if (chatWidget != null) {
+                WidgetChild child = chatWidget.getChild(0);
+                if (child != null && child.isVisible()) {
+                    posX = child.getX();
+                    posY = child.getY();
+                }
             }
         } catch (Exception e) {
             // Use defaults if widget not found

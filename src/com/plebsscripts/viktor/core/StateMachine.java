@@ -7,6 +7,7 @@ import com.plebsscripts.viktor.ge.*;
 import com.plebsscripts.viktor.limits.LimitTracker;
 import com.plebsscripts.viktor.notify.DiscordNotifier;
 import com.plebsscripts.viktor.util.Logs;
+import com.plebsscripts.viktor.util.WorldDetector;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -151,6 +152,13 @@ public class StateMachine {
                     Logs.info("At GE — checking if probe needed for " + current.itemName);
 
                     // Check if probe is stale
+                    if (WorldDetector.isHighRiskOrPvp()) {
+                        Logs.warn("Detected PvP/High Risk world - hopping to safe world...");
+                        if (WorldDetector.hopToP2P()) {
+                            Logs.info("Successfully hopped to safe world");
+                            antiBan.sleep(3000, 5000); // Wait for world change
+                        }
+                    }
                     if (current.needsProbe(settings.probeStaleMinutes)) {
                         Logs.info("Probe is stale, starting margin check");
                         phase = Phase.PROBE;

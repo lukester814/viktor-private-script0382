@@ -8,6 +8,7 @@ import com.plebsscripts.viktor.core.AntiBan;
 import com.plebsscripts.viktor.ge.GEApi.BuyOutcome;
 import com.plebsscripts.viktor.limits.LimitTracker;
 import com.plebsscripts.viktor.notify.DiscordNotifier;
+import com.plebsscripts.viktor.util.KellyCalculator;
 import com.plebsscripts.viktor.util.Logs;
 import java.util.Random;
 
@@ -55,8 +56,31 @@ public class GEOffers {
         if (humanBehavior != null && humanBehavior.shouldCheckItemFirst()) {
             humanBehavior.checkItemDetails(ic);
         }
+// KELLY CRITERION: Calculate optimal quantity
+        long bankroll = s.maxGpInFlight;
+        double winProb = ic.probUp; // From CSV
 
-        int targetQty = clampQty(ic.maxQtyPerCycle);
+        int kellyQty = KellyCalculator.calculateOptimalQuantity(
+                bankroll,
+                winProb,
+                ic.getBuyPrice(),
+                ic.getSellPrice(),
+                ic.maxQtyPerCycle
+        );
+
+        double kellyPct = KellyCalculator.calculateKellyPercentage(
+                winProb, ic.getBuyPrice(), ic.getSellPrice()
+        );
+
+        String riskCategory = KellyCalculator.getRiskCategory(kellyPct);
+
+        Logs.info("Kelly Analysis: " + kellyQty + " items (" +
+                String.format("%.1f%%", kellyPct * 100) + " of bankroll) - " + riskCategory + " risk");
+
+        // Use Kelly quantity instead of fixed
+        int targetQty = kellyQty;
+
+        // Apply human behavior adjustments
         if (humanBehavior != null) {
             targetQty = humanBehavior.maybeAdjustQuantity(targetQty);
         }

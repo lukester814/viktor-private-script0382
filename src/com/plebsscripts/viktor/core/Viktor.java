@@ -233,6 +233,23 @@ public class Viktor extends AbstractScript {
             Logs.error("Initialization failed: " + e.getMessage());
             e.printStackTrace();
         }
+
+        // After "Viktor initialized successfully!" log:
+
+        // Check world type and warn if risky
+        String worldInfo = WorldDetector.getWorldInfo();
+        Logs.info(worldInfo);
+
+        if (WorldDetector.isHighRiskOrPvp()) {
+            Logs.warn("⚠️  HIGH RISK WORLD DETECTED! Consider hopping to safer world.");
+            // Optionally auto-hop:
+            // WorldDetector.hopToP2P(); // or hopToF2P()
+        }
+
+        if (WorldDetector.isF2P()) {
+            Logs.warn("F2P world - some items may not be tradeable!");
+        }
+
     }
 
 
