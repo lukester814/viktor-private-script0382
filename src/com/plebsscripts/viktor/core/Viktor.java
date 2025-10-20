@@ -184,7 +184,7 @@ public class Viktor extends AbstractScript {
                 Logs.info("Pastebin hot reloader started");
             }
 
-            // Initialize JSON-based coordinator
+            // Initialise JSON-based coordinator
             JsonCoordinator jsonCoord = null;
 
             if (settings.enableCoordinator) {
@@ -262,6 +262,8 @@ public class Viktor extends AbstractScript {
         }
 
     }
+
+
 
 
 

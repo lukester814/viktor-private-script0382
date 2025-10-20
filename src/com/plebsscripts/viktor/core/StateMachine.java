@@ -199,62 +199,51 @@ public class StateMachine {
 
             case BUY_BULK:
                 Logs.info("Placing buy orders for " + current.itemName);
-
                 GEOffers.Result buyResult = offers.placeBuys(current, price, limits, settings);
 
-                if (buyResult.hit4hLimit()) {
-                    Logs.warn("4h limit hit on " + current.itemName);
+                if (buyResult.isOk()) {
+                    Logs.info("✓ Buy orders placed, waiting for completion...");
 
-                    // Report to SafeCoordinator (local)
-                    if (coord != null) {
-                        coord.reportLimit(current.itemName);
-                    }
+                    // ADD THIS: Wait for offers to complete
+                    int maxWaitSeconds = 120; // 2 minutes max
+                    int elapsedSeconds = 0;
+                    boolean completed = false;
 
-                    // Report to JSON coordinator (other bots)
-                    if (smartRotation != null) {
-                        smartRotation.reportLimitHit(current.itemName);
-                    }
+                    while (elapsedSeconds < maxWaitSeconds) {
+                        timers.sleepGaussian(5000, 1000); // Check every ~5s
 
-                    // Block locally
-                    if (limits != null) {
-                        limits.blockFor4h(current.itemName);
-                    }
-
-                    updateItemQueue();
-                    phase = Phase.ROTATE;
-                }
-
-                else if (buyResult.isOk()) {
-                    Logs.info("✓ Buy orders placed for " + current.itemName);
-
-                    // IMPROVED: Wait for offers with periodic checks
-                    int maxWaitTime = 60000; // 60 seconds max
-                    int checkInterval = 5000; // Check every 5 seconds
-                    int elapsed = 0;
-
-                    while (elapsed < maxWaitTime) {
-                        timers.sleepGaussian(checkInterval, 1000);
-                        elapsed += checkInterval;
-
-                        // Check if any offers are ready
                         if (ge.offersComplete(current.itemName)) {
-                            Logs.info("✓ Buy offers completed after " + (elapsed / 1000) + "s");
+                            Logs.info("✓ Buy offers completed!");
+                            ge.collectIfReady(current.itemName);
+                            completed = true;
                             break;
                         }
 
-                        Logs.debug("Waiting for buy offers... (" + (elapsed / 1000) + "s)");
+                        elapsedSeconds += 5;
+                        Logs.debug("Waiting for offers... " + elapsedSeconds + "s");
                     }
 
-                    // Collect what we have (even if not all filled)
-                    ge.collectIfReady(current.itemName);
+                    if (!completed) {
+                        Logs.warn("Buy offers timed out - collecting what we have");
+                        ge.collectIfReady(current.itemName);
+                    }
 
-                    phase = Phase.SELL_BULK;
-                } else {
-                    Logs.warn("Buy orders failed for " + current.itemName);
-                    phase = Phase.ROTATE;
+                    // Verify we got items
+                    if (!ge.ensureOpen()) {
+                        phase = Phase.ROTATE;
+                        break;
+                    }
+
+                    int itemCount = ge.inventoryCount(current.itemName);
+                    ge.close();
+
+                    if (itemCount > 0) {
+                        phase = Phase.SELL_BULK;
+                    } else {
+                        Logs.warn("No items received - skipping sell phase");
+                        phase = Phase.ROTATE;
+                    }
                 }
-
-                lastAction = System.currentTimeMillis();
                 break;
 
             case SELL_BULK:
