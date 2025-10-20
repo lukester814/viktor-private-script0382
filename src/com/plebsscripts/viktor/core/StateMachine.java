@@ -2,12 +2,14 @@ package com.plebsscripts.viktor.core;
 
 import com.plebsscripts.viktor.config.ItemConfig;
 import com.plebsscripts.viktor.config.Settings;
+import com.plebsscripts.viktor.coord.JsonCoordinator;
 import com.plebsscripts.viktor.coord.SafeCoordinator;
 import com.plebsscripts.viktor.ge.*;
 import com.plebsscripts.viktor.limits.LimitTracker;
 import com.plebsscripts.viktor.notify.DiscordNotifier;
 import com.plebsscripts.viktor.util.Logs;
 import com.plebsscripts.viktor.util.WorldDetector;
+import com.plebsscripts.viktor.core.SmartRotation;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -45,7 +47,7 @@ public class StateMachine {
     private final DiscordNotifier notify;
     private final ProfitTracker profit;
     private final HumanBehavior humanBehavior;
-
+    private final SmartRotation smartRotation;
     private ItemConfig current;
     private long lastAction;
     private final Random rng = new Random();
@@ -53,10 +55,11 @@ public class StateMachine {
     // Constructor with all dependencies
     public StateMachine(Settings s, List<ItemConfig> it, SafeCoordinator c, LimitTracker lt,
                         GENavigator n, GEOffers o, MarginProbe p, PriceModel pm,
-                        InventoryBanking b, AntiBan ab, Timers t, DiscordNotifier dn, ProfitTracker pf) {
+                        InventoryBanking b, AntiBan ab, Timers t, DiscordNotifier dn, ProfitTracker pf, JsonCoordinator jsonCoord) {
         this.settings = s;
         this.items = it;
         this.workingQueue = new ArrayList<ItemConfig>(it);
+        this.smartRotation = new SmartRotation(jsonCoord, lt, s.getAccountName());
         this.coord = c;
         this.limits = lt;
         this.nav = n;
@@ -91,23 +94,25 @@ public class StateMachine {
     }
 
     public void updateItemQueue() {
-        if (coord == null) {
+        if (smartRotation == null) {
+            // Fallback: simple filtering
             workingQueue = new ArrayList<ItemConfig>(items);
+
+            if (coord != null) {
+                Set<String> localBlocked = coord.getBlockedItems();
+                workingQueue.removeIf(ic -> localBlocked.contains(ic.itemName.toLowerCase()));
+            }
+
+            Logs.info("Working queue: " + workingQueue.size() + " items available");
             return;
         }
 
-        Set<String> localBlocked = coord.getBlockedItems();
-        workingQueue = new ArrayList<ItemConfig>();
+        // Use SmartRotation for intelligent prioritization
+        workingQueue = smartRotation.buildPrioritizedQueue(items);
 
-        for (ItemConfig ic : items) {
-            if (!localBlocked.contains(ic.itemName.toLowerCase())) {
-                workingQueue.add(ic);
-            }
-        }
-
-        Logs.info("Working queue: " + workingQueue.size() + " items available");
+        Logs.info("Smart Queue: " + workingQueue.size() + " items prioritized");
+        Logs.info(smartRotation.getTakeoverStats());
     }
-
     public void updateItems(List<ItemConfig> newItems) {
         synchronized (this.items) {
             this.items.clear();
@@ -133,19 +138,26 @@ public class StateMachine {
         switch (phase) {
 
             case IDLE:
-                // IMPROVED: Use Gaussian timing instead of uniform random
-                timers.sleepGaussian(1250, 400); // Mean 1.25s, stddev 400ms
+                timers.sleepGaussian(1250, 400);
 
-                current = workingQueue.get(rng.nextInt(workingQueue.size()));
-                Logs.info("Selected item: " + current.itemName);
-
-                // Maybe check item details first (human behavior)
-                if (humanBehavior.shouldCheckItemFirst()) {
-                    humanBehavior.checkItemDetails(current);
+                // Use SmartRotation for intelligent selection
+                if (smartRotation != null) {
+                    current = smartRotation.getNextItem(workingQueue);
+                } else {
+                    // Fallback: random selection
+                    if (!workingQueue.isEmpty()) {
+                        current = workingQueue.get(rng.nextInt(workingQueue.size()));
+                    }
                 }
 
-                phase = Phase.WALK_TO_GE;
-                break;
+                if (current == null) {
+                    Logs.warn("No available items - all blocked or queue empty");
+                    updateItemQueue();
+                    timers.sleepShort();
+                    return 5000;
+                }
+
+                Logs.info("Selected item: " + current.itemName);
 
             case WALK_TO_GE:
                 if (nav.walkToGE()) {
@@ -192,13 +204,27 @@ public class StateMachine {
 
                 if (buyResult.hit4hLimit()) {
                     Logs.warn("4h limit hit on " + current.itemName);
+
+                    // Report to SafeCoordinator (local)
                     if (coord != null) {
                         coord.reportLimit(current.itemName);
                     }
+
+                    // Report to JSON coordinator (other bots)
+                    if (smartRotation != null) {
+                        smartRotation.reportLimitHit(current.itemName);
+                    }
+
+                    // Block locally
+                    if (limits != null) {
+                        limits.blockFor4h(current.itemName);
+                    }
+
                     updateItemQueue();
                     phase = Phase.ROTATE;
+                }
 
-                } else if (buyResult.isOk()) {
+                else if (buyResult.isOk()) {
                     Logs.info("✓ Buy orders placed for " + current.itemName);
 
                     // IMPROVED: Wait for offers with periodic checks

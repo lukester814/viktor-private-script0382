@@ -17,7 +17,7 @@ public class Settings {
     public boolean respectLimits = true;
 
     // Coordinator
-    public boolean enableCoordinator = false; // CHANGED: Default false for safety
+    public boolean enableCoordinator = true; //
     public String coordinatorUrl = "http://127.0.0.1:8888"; // CHANGED: Match CoordinatorServer default port
     public String botId = "";
 

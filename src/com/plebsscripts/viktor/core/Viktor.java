@@ -3,6 +3,7 @@
 package com.plebsscripts.viktor.core;
 
 import com.plebsscripts.viktor.config.*;
+import com.plebsscripts.viktor.coord.JsonCoordinator;
 import com.plebsscripts.viktor.coord.SafeCoordinator;
 import com.plebsscripts.viktor.ge.*;
 import com.plebsscripts.viktor.limits.*;
@@ -183,11 +184,21 @@ public class Viktor extends AbstractScript {
                 Logs.info("Pastebin hot reloader started");
             }
 
-            // Initialize subsystems
+            // Initialize JSON-based coordinator
+            JsonCoordinator jsonCoord = null;
+
+            if (settings.enableCoordinator) {
+                String coordPath = new File(dataDir, "coordination.json").getAbsolutePath();
+                jsonCoord = new JsonCoordinator(coordPath, settings.getAccountName());
+                Logs.info("✓ JSON Coordinator enabled: " + coordPath);
+            } else {
+                Logs.info("Coordinator disabled in settings");
+            }
+
             SafeCoordinator coord = new SafeCoordinator(settings.getAccountName());
-            Logs.info("Using local coordinator (no network calls)");
 
             LimitTracker limits = LimitStore.loadForAccount(dataDir, settings.getAccountName());
+
             DiscordNotifier notify = DiscordNotifier.fromSettings(settings);
             profit = new ProfitTracker();
 
@@ -211,7 +222,7 @@ public class Viktor extends AbstractScript {
             state = new StateMachine(
                     settings, items, coord, limits,
                     nav, offers, probe, price, bank,
-                    antiBan, timers, notify, profit
+                    antiBan, timers, notify, profit, jsonCoord
             );
 
             // Setup overlay
