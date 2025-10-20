@@ -62,18 +62,15 @@ public class GEApiDreamBotAdapter implements GEApi {
 
     @Override
     public BuyOutcome placeBuy(String itemName, int priceEach, int qty) {
-        if (qty <= 0 || priceEach <= 0)
-
-            if (Widgets.getWidgetChild(465, 6, 7) != null) { // DreamBot widget ID
-                String text = Widgets.getWidgetChild(465, 6, 7).getText();
-                if (text != null && text.contains("limit")) {
-                    return BuyOutcome.LIMIT_HIT;
-                }
-            }
+        // Validate inputs
+        if (qty <= 0 || priceEach <= 0) {
             return BuyOutcome.FAILED;
+        }
 
         try {
+            // Attempt to place buy order
             boolean success = GrandExchange.buyItem(itemName, qty, priceEach);
+
             if (success) {
                 GEApiDreamBot.OfferInfo oi = track.registerOffer(itemName, GEApiDreamBot.Type.BUY, priceEach, qty);
                 itemToOfferId.put(itemName, oi.offerId);
@@ -81,15 +78,27 @@ public class GEApiDreamBotAdapter implements GEApi {
                 return BuyOutcome.PLACED;
             }
 
-            // Check for limit hit (enhance with widget checks if needed)
+            // If buy failed, check if it was due to 4h limit
+            // Use the NEW widget API (not deprecated)
+            try {
+                org.dreambot.api.wrappers.widgets.WidgetChild widget =
+                        Widgets.get(465, 6, 7); // Use .get() instead of .getWidgetChild()
 
-            if (Widgets.getWidgetChild(465, 6, 7) != null) { // DreamBot widget ID
-                String text = Widgets.getWidgetChild(465, 6, 7).getText();
-                if (text != null && text.contains("limit")) {
-                    return BuyOutcome.LIMIT_HIT;
+                if (widget != null && widget.isVisible()) {
+                    String text = widget.getText();
+                    if (text != null && text.toLowerCase().contains("limit")) {
+                        Logs.warn("4h limit detected for: " + itemName);
+                        return BuyOutcome.LIMIT_HIT;
+                    }
                 }
+            } catch (Exception widgetEx) {
+                // Widget check failed, just continue
+                Logs.debug("Widget check failed: " + widgetEx.getMessage());
             }
+
+            // Generic failure if not limit hit
             return BuyOutcome.FAILED;
+
         } catch (Exception e) {
             Logs.warn("placeBuy failed: " + e.getMessage());
             return BuyOutcome.FAILED;

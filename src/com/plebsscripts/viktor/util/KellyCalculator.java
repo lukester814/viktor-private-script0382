@@ -15,11 +15,22 @@ public class KellyCalculator {
      * @param sellPrice Price to sell item at
      * @return Optimal GP to invest
      */
+    /**
+     * Calculate optimal GP to invest using Kelly Criterion
+     *
+     * @param bankroll Total available GP
+     * @param winProbability Probability of successful flip (0.0 to 1.0)
+     * @param buyPrice Price to buy item at
+     * @param sellPrice Price to sell item at
+     * @param kellyFraction Fractional Kelly multiplier (e.g., 0.25 for quarter Kelly)
+     * @return Optimal GP to invest
+     */
     public static long calculateOptimalInvestment(
             long bankroll,
             double winProbability,
             int buyPrice,
-            int sellPrice) {
+            int sellPrice,
+            double kellyFraction) {
 
         if (bankroll <= 0 || buyPrice <= 0 || sellPrice <= buyPrice) {
             return 0;
@@ -34,11 +45,10 @@ public class KellyCalculator {
         double b = (double) margin / buyPrice;
 
         // Kelly percentage: (bp - q) / b
-        double kellyFraction = (b * p - q) / b;
+        double kelly = (b * p - q) / b;
 
-        // Apply fractional Kelly (0.25 = quarter Kelly for safety)
-        // Full Kelly can be too aggressive and risky
-        double fractionalKelly = kelly * kellyFraction * 0.25;
+        // Apply fractional Kelly (e.g., 0.25 = quarter Kelly for safety)
+        double fractionalKelly = kelly * kellyFraction;
 
         // Clamp between 0 and 1
         fractionalKelly = Math.max(0, Math.min(fractionalKelly, 1.0));
@@ -84,7 +94,7 @@ public class KellyCalculator {
             double kellyFraction) {
 
         long optimalInvestment = calculateOptimalInvestment(
-                bankroll, winProbability, buyPrice, sellPrice
+                bankroll, winProbability, buyPrice, sellPrice, kellyFraction  // ADD THIS PARAMETER
         );
 
         // Calculate quantity based on investment

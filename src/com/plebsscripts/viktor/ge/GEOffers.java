@@ -65,7 +65,8 @@ public class GEOffers {
                 winProb,
                 ic.getBuyPrice(),
                 ic.getSellPrice(),
-                ic.maxQtyPerCycle
+                ic.maxQtyPerCycle,
+                s.kellyFraction
         );
 
         double kellyPct = KellyCalculator.calculateKellyPercentage(
