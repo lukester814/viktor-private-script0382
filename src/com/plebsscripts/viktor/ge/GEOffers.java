@@ -107,7 +107,15 @@ public class GEOffers {
             long availableGp = s.maxGpInFlight - gpInFlight;
 
             if (availableGp < buyPrice) {
-                Logs.warn("GP exposure limit reached");
+                Logs.warn("Insufficient GP: need " + buyPrice + " gp, have " + availableGp + " gp available");
+
+                // Check if we have ANY GP at all
+                if (availableGp < 1000) {
+                    Logs.error("CRITICAL: Less than 1K GP available - stopping buys");
+                    if (notify != null) {
+                        notify.error("Out of GP! Available: " + availableGp + " gp");
+                    }
+                }
                 break;
             }
 

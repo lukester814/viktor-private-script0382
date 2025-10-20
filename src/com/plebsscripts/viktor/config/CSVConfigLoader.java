@@ -90,6 +90,16 @@ public class CSVConfigLoader {
 
             Logs.info("Loaded " + out.size() + " items from " + path);
 
+            if (out.isEmpty()) {
+                Logs.error("CSV loaded but no valid items found!");
+                return out;
+            }
+            // Check for suspicious data
+            for (ItemConfig ic : out) {
+                if (ic.estBuy > 1_000_000_000 || ic.estSell > 1_000_000_000) {
+                    Logs.warn("Suspicious price for " + ic.itemName + " - over 1B gp!");
+                }
+            }
             // IMPROVEMENT 5: Sort by expected profit (best first)
             out.sort((a, b) -> {
                 int profitA = a.estSell - a.estBuy;

@@ -198,6 +198,43 @@ public class StateMachine {
                 break;
 
             case BUY_BULK:
+                // Check if GE has free slots
+                if (!ge.ensureOpen()) {
+                    Logs.warn("Cannot open GE");
+                    phase = Phase.ROTATE;
+                    break;
+                }
+
+                int freeSlots = ge.freeSlots();
+                ge.close();
+
+                if (freeSlots <= 0) {
+                    Logs.warn("No free GE slots - waiting for offers to complete");
+
+                    // Wait for offers to complete (with timeout)
+                    int maxWait = 120; // 2 minutes
+                    int waited = 0;
+
+                    while (waited < maxWait && freeSlots <= 0) {
+                        timers.sleepGaussian(5000, 1000); // Wait ~5 seconds
+
+                        if (ge.ensureOpen()) {
+                            freeSlots = ge.freeSlots();
+                            ge.close();
+                        }
+
+                        waited += 5;
+                        Logs.debug("Waiting for free slots... (" + waited + "s)");
+                    }
+
+                    if (freeSlots <= 0) {
+                        Logs.warn("Still no free slots after " + maxWait + "s - rotating item");
+                        phase = Phase.ROTATE;
+                        break;
+                    }
+
+                    Logs.info("Free slot available, continuing with buy");
+                }
                 Logs.info("Placing buy orders for " + current.itemName);
                 GEOffers.Result buyResult = offers.placeBuys(current, price, limits, settings);
 

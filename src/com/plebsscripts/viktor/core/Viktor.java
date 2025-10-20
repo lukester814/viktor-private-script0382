@@ -129,8 +129,52 @@ public class Viktor extends AbstractScript {
 
             if (items == null || items.isEmpty()) {
                 Logs.error("No items loaded! Please load CSV or Pastebin first.");
+                // Show error dialog to user
+                javax.swing.SwingUtilities.invokeLater(() -> {
+                    javax.swing.JOptionPane.showMessageDialog(
+                            null,
+                            "No items loaded!\n\nPlease:\n1. Load a CSV file, OR\n2. Enter a Pastebin URL\n3. Then click Start again",
+                            "Viktor Error",
+                            javax.swing.JOptionPane.ERROR_MESSAGE
+                    );
+                });
+
+                // Reset start button
+                initialized = false;
                 return;
             }
+
+            // Validate items have required data
+            int invalidItems = 0;
+            for (ItemConfig ic : items) {
+                if (ic.itemName == null || ic.itemName.isEmpty()) {
+                    invalidItems++;
+                    Logs.warn("Skipping invalid item (no name)");
+                } else if (ic.estBuy <= 0 || ic.estSell <= 0) {
+                    invalidItems++;
+                    Logs.warn("Skipping " + ic.itemName + " (invalid prices)");
+                }
+            }
+
+            if (invalidItems > 0) {
+                Logs.warn("Removed " + invalidItems + " invalid items from queue");
+            }
+
+            // If ALL items invalid, stop
+            if (items.size() - invalidItems == 0) {
+                Logs.error("All items invalid! Cannot start bot.");
+                javax.swing.SwingUtilities.invokeLater(() -> {
+                    javax.swing.JOptionPane.showMessageDialog(
+                            null,
+                            "All loaded items are invalid!\n\nCheck your CSV file format.",
+                            "Viktor Error",
+                            javax.swing.JOptionPane.ERROR_MESSAGE
+                    );
+                });
+                initialized = false;
+                return;
+            }
+
 
             // After initializing bot, check world type
             String worldType = WorldDetector.getWorldType();
