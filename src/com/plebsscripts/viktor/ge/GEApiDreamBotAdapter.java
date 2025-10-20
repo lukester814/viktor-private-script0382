@@ -4,6 +4,8 @@ import com.plebsscripts.viktor.util.Logs;
 import org.dreambot.api.methods.grandexchange.GrandExchange;
 import org.dreambot.api.methods.grandexchange.GrandExchangeItem;
 import org.dreambot.api.methods.container.impl.Inventory;
+import org.dreambot.api.methods.widget.Widgets;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -60,7 +62,15 @@ public class GEApiDreamBotAdapter implements GEApi {
 
     @Override
     public BuyOutcome placeBuy(String itemName, int priceEach, int qty) {
-        if (qty <= 0 || priceEach <= 0) return BuyOutcome.FAILED;
+        if (qty <= 0 || priceEach <= 0)
+
+            if (Widgets.getWidgetChild(465, 6, 7) != null) { // DreamBot widget ID
+                String text = Widgets.getWidgetChild(465, 6, 7).getText();
+                if (text != null && text.contains("limit")) {
+                    return BuyOutcome.LIMIT_HIT;
+                }
+            }
+            return BuyOutcome.FAILED;
 
         try {
             boolean success = GrandExchange.buyItem(itemName, qty, priceEach);
@@ -72,6 +82,13 @@ public class GEApiDreamBotAdapter implements GEApi {
             }
 
             // Check for limit hit (enhance with widget checks if needed)
+
+            if (Widgets.getWidgetChild(465, 6, 7) != null) { // DreamBot widget ID
+                String text = Widgets.getWidgetChild(465, 6, 7).getText();
+                if (text != null && text.contains("limit")) {
+                    return BuyOutcome.LIMIT_HIT;
+                }
+            }
             return BuyOutcome.FAILED;
         } catch (Exception e) {
             Logs.warn("placeBuy failed: " + e.getMessage());

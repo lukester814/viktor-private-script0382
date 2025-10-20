@@ -23,6 +23,7 @@ public class Settings {
 
     // Discord
     public DiscordBlock discord = new DiscordBlock();
+    public double kellyFraction = 0.25; // Default quarter Kelly
 
     public static class DiscordBlock {
         public boolean enabled = false;

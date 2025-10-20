@@ -38,7 +38,7 @@ public class KellyCalculator {
 
         // Apply fractional Kelly (0.25 = quarter Kelly for safety)
         // Full Kelly can be too aggressive and risky
-        double fractionalKelly = kellyFraction * 0.25;
+        double fractionalKelly = kelly * kellyFraction * 0.25;
 
         // Clamp between 0 and 1
         fractionalKelly = Math.max(0, Math.min(fractionalKelly, 1.0));
@@ -47,6 +47,22 @@ public class KellyCalculator {
         long investment = (long) (bankroll * fractionalKelly);
 
         return investment;
+    }
+
+
+    public static boolean isSafeToTrade(double winProbability, int margin, int buyPrice) {
+        // Reject if probUp is unrealistic
+        if (winProbability < 0.3 || winProbability > 0.95) {
+            return false; // Suspicious probability
+        }
+
+        // Reject if margin is too thin
+        double marginPct = (double) margin / buyPrice;
+        if (marginPct < 0.01) { // Less than 1% margin
+            return false; // Too risky
+        }
+
+        return true;
     }
 
     /**
@@ -64,7 +80,8 @@ public class KellyCalculator {
             double winProbability,
             int buyPrice,
             int sellPrice,
-            int maxQuantity) {
+            int maxQuantity,
+            double kellyFraction) {
 
         long optimalInvestment = calculateOptimalInvestment(
                 bankroll, winProbability, buyPrice, sellPrice
