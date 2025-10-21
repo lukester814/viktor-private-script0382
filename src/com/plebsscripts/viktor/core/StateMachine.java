@@ -51,11 +51,13 @@ public class StateMachine {
     private ItemConfig current;
     private long lastAction;
     private final Random rng = new Random();
+    private final com.plebsscripts.viktor.ge.GEInteractionHandler geHandler;
 
     // Constructor with all dependencies
     public StateMachine(Settings s, List<ItemConfig> it, SafeCoordinator c, LimitTracker lt,
                         GENavigator n, GEOffers o, MarginProbe p, PriceModel pm,
-                        InventoryBanking b, AntiBan ab, Timers t, DiscordNotifier dn, ProfitTracker pf, JsonCoordinator jsonCoord) {
+                        InventoryBanking b, AntiBan ab, Timers t, DiscordNotifier dn, ProfitTracker pf, JsonCoordinator jsonCoord,
+                        com.plebsscripts.viktor.ge.GEInteractionHandler handler) {
         this.settings = s;
         this.items = it;
         this.workingQueue = new ArrayList<ItemConfig>(it);
@@ -74,6 +76,8 @@ public class StateMachine {
         this.profit = pf;
         this.humanBehavior = new HumanBehavior(ab);
         this.lastAction = System.currentTimeMillis();
+        this.geHandler = handler;
+        Logs.info("StateMachine: SmartMouse integration enabled");
     }
 
     public void start() {

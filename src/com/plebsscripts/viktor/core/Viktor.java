@@ -262,11 +262,16 @@ public class Viktor extends AbstractScript {
             InventoryBanking bank = new InventoryBanking();
             Timers timers = new Timers();
 
+            // Create GE interaction handler with SmartMouse
+            com.plebsscripts.viktor.ge.GEInteractionHandler geHandler =
+                    new com.plebsscripts.viktor.ge.GEInteractionHandler();
+
             // Create state machine
             state = new StateMachine(
                     settings, items, coord, limits,
                     nav, offers, probe, price, bank,
-                    antiBan, timers, notify, profit, jsonCoord
+                    antiBan, timers, notify, profit, jsonCoord,
+                    geHandler  // Pass SmartMouse handler
             );
 
             // Setup overlay
