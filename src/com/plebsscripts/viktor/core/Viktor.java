@@ -119,6 +119,12 @@ public class Viktor extends AbstractScript {
     /**
      * Initialize bot AFTER user clicks Start
      */
+    /**
+     * Initialize bot AFTER user clicks Start
+     */
+    /**
+     * Initialize bot AFTER user clicks Start
+     */
     private void initializeBot() {
         try {
             Logs.info("Capturing settings from GUI...");
@@ -127,8 +133,10 @@ public class Viktor extends AbstractScript {
             // Get items from GUI table
             List<ItemConfig> items = gui.getItemsModel().getItems();
 
+            // CRITICAL: Check if items are loaded
             if (items == null || items.isEmpty()) {
                 Logs.error("No items loaded! Please load CSV or Pastebin first.");
+
                 // Show error dialog to user
                 javax.swing.SwingUtilities.invokeLater(() -> {
                     javax.swing.JOptionPane.showMessageDialog(
@@ -137,11 +145,14 @@ public class Viktor extends AbstractScript {
                             "Viktor Error",
                             javax.swing.JOptionPane.ERROR_MESSAGE
                     );
+
+                    // Reset GUI state so user can try again
+                    gui.setStatus("ERROR: No items loaded");
                 });
 
-                // Reset start button
+                // Reset start button state (need to add method to AppGUI)
                 initialized = false;
-                return;
+                return; // Exit initialization
             }
 
             // Validate items have required data
@@ -163,36 +174,86 @@ public class Viktor extends AbstractScript {
             // If ALL items invalid, stop
             if (items.size() - invalidItems == 0) {
                 Logs.error("All items invalid! Cannot start bot.");
+
                 javax.swing.SwingUtilities.invokeLater(() -> {
                     javax.swing.JOptionPane.showMessageDialog(
                             null,
-                            "All loaded items are invalid!\n\nCheck your CSV file format.",
+                            "All loaded items are invalid!\n\nCheck your CSV file format:\n" +
+                                    "- Must have item_name, est_buy_price, est_sell_price columns\n" +
+                                    "- Prices must be > 0",
                             "Viktor Error",
                             javax.swing.JOptionPane.ERROR_MESSAGE
                     );
+
+                    gui.setStatus("ERROR: Invalid CSV data");
                 });
+
                 initialized = false;
                 return;
             }
 
-
-            // After initializing bot, check world type
+            // Check world type and warn if risky
             String worldType = WorldDetector.getWorldType();
             Logs.info("World Type: " + worldType + " (World " + WorldDetector.getCurrentWorldNumber() + ")");
 
-            // Optionally filter items based on world type
-            if (WorldDetector.isF2P()) {
-                Logs.warn("F2P world detected - some items may not be tradeable!");
-                // You could filter out P2P-only items here if needed
+            if (WorldDetector.isHighRiskOrPvp()) {
+                Logs.warn("⚠️  HIGH RISK WORLD DETECTED!");
+
+                int choice = javax.swing.JOptionPane.showConfirmDialog(
+                        null,
+                        "You are on a HIGH RISK or PvP world!\n\n" +
+                                "This is dangerous for botting.\n\n" +
+                                "Hop to safe world?",
+                        "World Warning",
+                        javax.swing.JOptionPane.YES_NO_OPTION,
+                        javax.swing.JOptionPane.WARNING_MESSAGE
+                );
+
+                if (choice == javax.swing.JOptionPane.YES_OPTION) {
+                    Logs.info("Hopping to safe world...");
+                    if (WorldDetector.hopToP2P()) {
+                        Logs.info("Successfully hopped to safe world");
+                        try { Thread.sleep(3000); } catch (InterruptedException e) {}
+                    } else {
+                        Logs.error("Failed to hop worlds!");
+                    }
+                }
             }
 
-            Logs.info("Personalizing " + items.size() + " items...");
+            if (WorldDetector.isF2P()) {
+                Logs.warn("F2P world detected - some items may not be tradeable!");
+            }
+
+            Logs.info("Personalizing " + items.size() + " items for " + settings.getAccountName() + "...");
 
             // Personalize items for this account
             items = ConfigPersonalizer.personalizeForAccount(items, settings.getAccountName());
             items = ConfigPersonalizer.filterUnprofitable(items);
 
-            Logs.info("Loaded " + items.size() + " personalized items for " + settings.getAccountName());
+            Logs.info("Loaded " + items.size() + " personalized items");
+
+            // Final check after personalization
+            if (items.isEmpty()) {
+                Logs.error("No profitable items after personalization!");
+
+                javax.swing.SwingUtilities.invokeLater(() -> {
+                    javax.swing.JOptionPane.showMessageDialog(
+                            null,
+                            "No profitable items found!\n\n" +
+                                    "All items filtered out due to:\n" +
+                                    "- Negative margins after GE tax\n" +
+                                    "- Below minimum profit threshold\n\n" +
+                                    "Try loading different items.",
+                            "Viktor Error",
+                            javax.swing.JOptionPane.ERROR_MESSAGE
+                    );
+
+                    gui.setStatus("ERROR: No profitable items");
+                });
+
+                initialized = false;
+                return;
+            }
 
             // Update table with personalized items
             gui.getItemsModel().setItems(items);
@@ -228,7 +289,7 @@ public class Viktor extends AbstractScript {
                 Logs.info("Pastebin hot reloader started");
             }
 
-            // Initialise JSON-based coordinator
+            // Initialize JSON-based coordinator
             JsonCoordinator jsonCoord = null;
 
             if (settings.enableCoordinator) {
@@ -240,9 +301,7 @@ public class Viktor extends AbstractScript {
             }
 
             SafeCoordinator coord = new SafeCoordinator(settings.getAccountName());
-
             LimitTracker limits = LimitStore.loadForAccount(dataDir, settings.getAccountName());
-
             DiscordNotifier notify = DiscordNotifier.fromSettings(settings);
             profit = new ProfitTracker();
 
@@ -271,7 +330,7 @@ public class Viktor extends AbstractScript {
                     settings, items, coord, limits,
                     nav, offers, probe, price, bank,
                     antiBan, timers, notify, profit, jsonCoord,
-                    geHandler  // Pass SmartMouse handler
+                    geHandler
             );
 
             // Setup overlay
@@ -283,36 +342,35 @@ public class Viktor extends AbstractScript {
             Logs.info("Viktor initialized successfully!");
             Logs.info("═══════════════════════════════════════");
             Logs.info("  Items: " + items.size() + " (personalized)");
-            Logs.info("  Coordinator: Local (safe mode)");
+            Logs.info("  World: " + WorldDetector.getWorldInfo());
+            Logs.info("  Coordinator: " + (jsonCoord != null ? "Enabled (JSON)" : "Local only"));
             Logs.info("  Discord: " + (notify != null ? "Enabled" : "Disabled"));
             Logs.info("  Anti-Ban: Enhanced Gaussian timing");
             Logs.info("  Human Behavior: Mistake simulation enabled");
+            Logs.info("  SmartMouse: Bezier curves + overshooting");
             Logs.info("═══════════════════════════════════════");
 
         } catch (Exception e) {
             Logs.error("Initialization failed: " + e.getMessage());
             e.printStackTrace();
+
+            // Show error to user
+            javax.swing.SwingUtilities.invokeLater(() -> {
+                javax.swing.JOptionPane.showMessageDialog(
+                        null,
+                        "Bot initialization failed!\n\n" +
+                                "Error: " + e.getMessage() + "\n\n" +
+                                "Check console for details.",
+                        "Viktor Error",
+                        javax.swing.JOptionPane.ERROR_MESSAGE
+                );
+
+                gui.setStatus("ERROR: Initialization failed");
+            });
+
+            initialized = false;
         }
-
-        // After "Viktor initialized successfully!" log:
-
-        // Check world type and warn if risky
-        String worldInfo = WorldDetector.getWorldInfo();
-        Logs.info(worldInfo);
-
-        if (WorldDetector.isHighRiskOrPvp()) {
-            Logs.warn("⚠️  HIGH RISK WORLD DETECTED! Consider hopping to safer world.");
-            // Optionally auto-hop:
-            // WorldDetector.hopToP2P(); // or hopToF2P()
-        }
-
-        if (WorldDetector.isF2P()) {
-            Logs.warn("F2P world - some items may not be tradeable!");
-        }
-
     }
-
-
 
 
 

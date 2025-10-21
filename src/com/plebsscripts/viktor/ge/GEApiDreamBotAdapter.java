@@ -255,8 +255,6 @@ public class GEApiDreamBotAdapter implements GEApi {
         }
     }
 
-    /// In GEApiDreamBotAdapter.java, replace offersComplete() method:
-
     @Override
     public boolean offersComplete(String itemName) {
         try {
@@ -276,6 +274,8 @@ public class GEApiDreamBotAdapter implements GEApi {
                         Logs.info("Offer slot " + slot + " ready to collect: " + itemName);
                         anyReady = true;
                     } else {
+                        // Check if offer is stale (been pending too long)
+                        // Since DreamBot doesn't expose timestamps, we rely on the tracker
                         Logs.debug("Offer slot " + slot + " still pending: " + itemName);
                     }
                 }
@@ -288,8 +288,7 @@ public class GEApiDreamBotAdapter implements GEApi {
             return false;
         }
     }
-
-    // Add this new method to force collection check:
+    //  method to force collection check:
     public void collectIfReady(String itemName) {
         try {
             if (!GrandExchange.isOpen()) {

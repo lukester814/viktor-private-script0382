@@ -15,6 +15,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class StateMachine {
 
@@ -52,6 +54,10 @@ public class StateMachine {
     private long lastAction;
     private final Random rng = new Random();
     private final com.plebsscripts.viktor.ge.GEInteractionHandler geHandler;
+
+    // NEW: Track recently failed items
+    private final Map<String, Long> failedProbes = new ConcurrentHashMap<>();
+    private static final long PROBE_FAIL_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
 
     // Constructor with all dependencies
     public StateMachine(Settings s, List<ItemConfig> it, SafeCoordinator c, LimitTracker lt,
@@ -107,6 +113,19 @@ public class StateMachine {
                 workingQueue.removeIf(ic -> localBlocked.contains(ic.itemName.toLowerCase()));
             }
 
+            // NEW: Remove recently failed items
+            long now = System.currentTimeMillis();
+            workingQueue.removeIf(ic -> {
+                Long failTime = failedProbes.get(ic.itemName.toLowerCase());
+                if (failTime != null && (now - failTime) < PROBE_FAIL_COOLDOWN_MS) {
+                    long remainingMinutes = (PROBE_FAIL_COOLDOWN_MS - (now - failTime)) / 60000;
+                    Logs.debug("Skipping recently failed item: " + ic.itemName +
+                            " (retry in " + remainingMinutes + " min)");
+                    return true;
+                }
+                return false;
+            });
+
             Logs.info("Working queue: " + workingQueue.size() + " items available");
             return;
         }
@@ -114,9 +133,25 @@ public class StateMachine {
         // Use SmartRotation for intelligent prioritization
         workingQueue = smartRotation.buildPrioritizedQueue(items);
 
+        // NEW: Remove recently failed items from smart queue too
+        long now = System.currentTimeMillis();
+        workingQueue.removeIf(ic -> {
+            Long failTime = failedProbes.get(ic.itemName.toLowerCase());
+            if (failTime != null && (now - failTime) < PROBE_FAIL_COOLDOWN_MS) {
+                long remainingMinutes = (PROBE_FAIL_COOLDOWN_MS - (now - failTime)) / 60000;
+                Logs.debug("Skipping recently failed item: " + ic.itemName +
+                        " (retry in " + remainingMinutes + " min)");
+                return true;
+            }
+            return false;
+        });
+
         Logs.info("Smart Queue: " + workingQueue.size() + " items prioritized");
-        Logs.info(smartRotation.getTakeoverStats());
+        if (smartRotation != null) {
+            Logs.info(smartRotation.getTakeoverStats());
+        }
     }
+
     public void updateItems(List<ItemConfig> newItems) {
         synchronized (this.items) {
             this.items.clear();
@@ -162,6 +197,8 @@ public class StateMachine {
                 }
 
                 Logs.info("Selected item: " + current.itemName);
+                phase = Phase.WALK_TO_GE;
+                break;
 
             case WALK_TO_GE:
                 if (nav.walkToGE()) {
@@ -192,9 +229,21 @@ public class StateMachine {
 
                 if (probeSuccess && current.hasGoodMargin()) {
                     Logs.info("✓ Margin verified: " + current.itemName);
+
+                    // NEW: Remove from failed list if it was there
+                    failedProbes.remove(current.itemName.toLowerCase());
+
                     phase = Phase.BUY_BULK;
                 } else {
                     Logs.warn("✗ Margin not profitable: " + current.itemName + ", skipping");
+
+                    // NEW: Add to failed list with timestamp
+                    failedProbes.put(current.itemName.toLowerCase(), System.currentTimeMillis());
+                    Logs.info("Item blacklisted for " + (PROBE_FAIL_COOLDOWN_MS / 60000) + " minutes");
+
+                    // Update queue to exclude this item
+                    updateItemQueue();
+
                     phase = Phase.ROTATE;
                 }
 
